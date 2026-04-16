@@ -50,10 +50,20 @@ st.markdown("""
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 
 <style>
-/* ── Temel font ── */
-html, body, [class*="css"], .stMarkdown, .stTextInput,
-.stSelectbox, .stRadio, .stCheckbox, .stNumberInput,
-button, label, p, h1, h2, h3, h4, span, div {
+/* ── Temel font — ikon fontlarını (Material Icons) bozmamak için
+       span ve div dahil edilmedi ── */
+html, body { font-family: 'Inter', 'Segoe UI', system-ui, sans-serif !important; }
+
+.stMarkdown, .stMarkdown p, .stMarkdown li,
+.stTextInput input, .stTextInput label,
+.stSelectbox label, .stSelectbox div[data-baseweb],
+.stRadio label, .stCheckbox label,
+.stNumberInput input, .stNumberInput label,
+.stButton button, .stDownloadButton button,
+.stDataFrame, .stMetric label, .stMetric div,
+.stAlert, .stInfo, .stSuccess, .stError, .stWarning,
+.stTabs [data-baseweb="tab"],
+h1, h2, h3, h4, p, label {
     font-family: 'Inter', 'Segoe UI', system-ui, sans-serif !important;
 }
 
