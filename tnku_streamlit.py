@@ -358,12 +358,27 @@ def _faaliyet_satirlari(kadro_su: str) -> list[dict]:
 
 def _bul_font(dosya: str) -> str | None:
     klasorler = [
+        # Windows
         r"C:\Windows\Fonts",
         r"C:\Windows\fonts",
-        os.path.expanduser("~/.fonts"),
+        # Linux – DejaVu (packages.txt: fonts-dejavu-core)
         "/usr/share/fonts/truetype/dejavu",
+        "/usr/share/fonts/dejavu",
+        "/usr/share/fonts/truetype/ttf-dejavu",
+        # Linux – Liberation
         "/usr/share/fonts/truetype/liberation",
+        "/usr/share/fonts/liberation",
+        # Linux – Ubuntu genel
+        "/usr/share/fonts/truetype",
+        "/usr/share/fonts",
+        # macOS
         "/System/Library/Fonts",
+        "/Library/Fonts",
+        # Kullanıcı
+        os.path.expanduser("~/.fonts"),
+        os.path.expanduser("~/Library/Fonts"),
+        # Uygulamanın yanındaki fonts/ klasörü
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts"),
     ]
     for k in klasorler:
         yol = os.path.join(k, dosya)
@@ -372,27 +387,39 @@ def _bul_font(dosya: str) -> str | None:
     return None
 
 
+def _kaydet_font(isim: str, dosya: str) -> bool:
+    """Fontu kaydet; zaten kayıtlıysa sessizce geç."""
+    try:
+        pdfmetrics.getFont(isim)
+        return True          # zaten kayıtlı
+    except Exception:
+        pass
+    yol = _bul_font(dosya)
+    if not yol:
+        return False
+    try:
+        pdfmetrics.registerFont(TTFont(isim, yol))
+        return True
+    except Exception:
+        return False
+
+
 def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
     buf = io.BytesIO()
+
+    # Normal + Bold çiftlerini dene; ilk başarılı çifti kullan
     fr, fb = "Helvetica", "Helvetica-Bold"
-    for fn, bn in [
-        ("arial.ttf",       "arialbd.ttf"),
-        ("Arial.ttf",       "ArialBold.ttf"),
-        ("LiberationSans-Regular.ttf", "LiberationSans-Bold.ttf"),
-        ("DejaVuSans.ttf",  "DejaVuSans-Bold.ttf"),
+    for (fn, fin), (bn, bin_) in [
+        (("TRR_dv",  "DejaVuSans.ttf"),       ("TRB_dv",  "DejaVuSans-Bold.ttf")),
+        (("TRR_lib", "LiberationSans-Regular.ttf"), ("TRB_lib", "LiberationSans-Bold.ttf")),
+        (("TRR_ar",  "arial.ttf"),             ("TRB_ar",  "arialbd.ttf")),
+        (("TRR_AR",  "Arial.ttf"),             ("TRB_AR",  "ArialBold.ttf")),
     ]:
-        ry = _bul_font(fn)
-        if ry:
-            try:
-                pdfmetrics.registerFont(TTFont("TRR", ry))
-                by = _bul_font(bn)
-                if by:
-                    pdfmetrics.registerFont(TTFont("TRB", by))
-                    fb = "TRB"
-                fr = "TRR"
-                break
-            except Exception:
-                pass
+        if _kaydet_font(fn, fin):
+            fr = fn
+            if _kaydet_font(bn, bin_):
+                fb = bn
+            break
 
     doc = SimpleDocTemplate(
         buf, pagesize=A4,
