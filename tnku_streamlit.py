@@ -57,9 +57,17 @@ button, label, p, h1, h2, h3, h4, span, div {
     font-family: 'Inter', 'Segoe UI', system-ui, sans-serif !important;
 }
 
-/* ── Streamlit gövde padding azalt ── */
-.block-container { padding-top: 1rem !important; padding-bottom: 0 !important; }
+/* ── Streamlit üst çubuk: mobilde daha yüksek olduğu için padding ── */
+.block-container {
+    padding-top: 4.5rem !important;
+    padding-bottom: 0 !important;
+}
 .stMainBlockContainer { max-width: 1100px; }
+
+/* Masaüstünde padding'i azalt */
+@media (min-width: 769px) {
+    .block-container { padding-top: 2rem !important; }
+}
 
 /* ── Başlık bandı ── */
 .header-bar {
@@ -211,8 +219,13 @@ button, label, p, h1, h2, h3, h4, span, div {
 
 /* ── Mobil uyum ── */
 @media (max-width: 768px) {
-    .block-container { padding: 0.5rem 0.75rem !important; }
+    .block-container {
+        padding-top: 4.5rem !important;
+        padding-left: 0.75rem !important;
+        padding-right: 0.75rem !important;
+    }
     .header-bar { padding: 12px 14px; border-radius: 8px; }
+    .header-bar h2 { font-size: 0.95em !important; line-height: 1.4; }
     .card { padding: 14px; }
     .puan-kutu .value { font-size: 1.4em; }
 }
