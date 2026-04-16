@@ -13,7 +13,6 @@ import os
 import datetime
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
 import tnku_atama as t
 
 # ── PDF kütüphanesi ──────────────────────────────────────────────────────────
@@ -79,8 +78,6 @@ if "sonuc" not in st.session_state:
     st.session_state.sonuc = None
 if "son_aday" not in st.session_state:
     st.session_state.son_aday = None
-if "switch_to_results" not in st.session_state:
-    st.session_state.switch_to_results = False
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Sabitler
@@ -393,23 +390,10 @@ st.markdown("""
 # ─────────────────────────────────────────────────────────────────────────────
 # Sekmeler
 # ─────────────────────────────────────────────────────────────────────────────
-tab1, tab2, tab3 = st.tabs([
+tab1, tab2 = st.tabs([
     "📋  1 · Aday Bilgileri",
     "➕  2 · Faaliyetler",
-    "📊  3 · Sonuçlar",
 ])
-
-# Hesapla sonrası Sonuçlar sekmesine otomatik geç
-if st.session_state.switch_to_results:
-    st.session_state.switch_to_results = False
-    components.html("""
-    <script>
-    setTimeout(function () {
-        const tabs = window.parent.document.querySelectorAll('[data-baseweb="tab"]');
-        if (tabs.length >= 3) tabs[2].click();
-    }, 150);
-    </script>
-    """, height=0)
 
 # ═══════════════════════════════════════ TAB 1 – ADAY BİLGİLERİ ══════════════
 with tab1:
@@ -648,92 +632,8 @@ with tab2:
     else:
         st.info("Henüz faaliyet eklenmedi. Sol taraftan kategori seçip faaliyet ekleyin.")
 
-# ═══════════════════════════════════════ TAB 3 – SONUÇLAR ════════════════════
-with tab3:
-    sonuc    = st.session_state.sonuc
-    son_aday = st.session_state.son_aday
-
-    if sonuc is None or son_aday is None:
-        st.info("Faaliyetleri girin, ardından aşağıdaki **HESAPLA** butonuna basın.")
-    else:
-        pnlar = sonuc["puanlar"]
-        genel = sonuc["genel_sonuc"]
-
-        kadro_adi_tam = {
-            "dr_ilk":     "Dr. Öğretim Üyesi – İlk Atanma",
-            "dr_yeniden": f"Dr. Öğretim Üyesi – Yeniden Atanma ({son_aday.yeniden_sure} Yıl)",
-            "docent":     "Doçent",
-            "profesor":   "Profesör",
-        }.get(son_aday.kadro_turu, "–")
-
-        # ── Genel sonuç bandı ────────────────────────────────────────────────
-        gtxt = ("✓  TÜM KRİTERLER SAĞLANIYOR – BAŞVURU YAPILABİLİR"
-                if genel else
-                "✗  BAZI KRİTERLER SAĞLANMIYOR – BAŞVURU YAPILAMAZ")
-        st.markdown(
-            f'<div class="{"sonuc-ok" if genel else "sonuc-fail"}">{gtxt}</div>',
-            unsafe_allow_html=True,
-        )
-
-        # ── Aday özeti ───────────────────────────────────────────────────────
-        sc1, sc2, sc3, sc4 = st.columns(4)
-        sc1.metric("Aday", son_aday.ad_soyad)
-        sc2.metric("Alan", son_aday.alan)
-        sc3.metric("Kadro", kadro_adi_tam)
-        sc4.metric("Tarih", datetime.date.today().strftime("%d.%m.%Y"))
-
-        st.divider()
-
-        # ── Puan özeti ───────────────────────────────────────────────────────
-        pc1, pc2, pc3 = st.columns(3)
-        pc1.metric("PUAN-1  (EK-2: 1.1–1.6 kapsamı)", f"{pnlar['puan1']:.2f}")
-        pc2.metric("PUAN-2  (EK-2 tamamı – kalan)",   f"{pnlar['puan2']:.2f}")
-        pc3.metric("TOPLAM PUAN",                      f"{pnlar['toplam']:.2f}")
-
-        st.divider()
-
-        # ── Kriter kontrol ───────────────────────────────────────────────────
-        st.subheader("Kriter Kontrol Sonuçları")
-        for kr in sonuc["kriterler"]:
-            ok        = "✓" in kr["durum"]
-            info_only = "(f) Bilgi:" in kr["kriter"]
-            if info_only:
-                css, icon = "kriter-info", "ℹ️"
-            elif ok:
-                css, icon = "kriter-ok",   "✓"
-            else:
-                css, icon = "kriter-fail",  "✗"
-            not_str = (f"  <small style='color:#555'>({kr['notlar']})</small>"
-                       if kr["notlar"] else "")
-            st.markdown(
-                f'<div class="{css}"><b>{icon}</b>&nbsp;&nbsp;{kr["kriter"]}{not_str}</div>',
-                unsafe_allow_html=True,
-            )
-
-        st.divider()
-
-        # ── Faaliyet detayı ──────────────────────────────────────────────────
-        st.subheader("Faaliyet Detayı")
-        drows = [
-            {
-                "Kod":     d["kod"],
-                "Faaliyet": d["ad"][:65],
-                "Adet":    d["adet"],
-                "Puan":    round(d["puan"], 2),
-                "Tür":     "PUAN-1" if d["puan1_mi"] else "PUAN-2",
-            }
-            for d in pnlar["detaylar"]
-        ]
-        if drows:
-            ddf = pd.DataFrame(drows)
-            st.dataframe(
-                ddf.style.map(_tur_renk, subset=["Tür"]),
-                use_container_width=True,
-                height=min(420, 50 + 36 * len(drows)),
-            )
-
 # ─────────────────────────────────────────────────────────────────────────────
-# Alt Çubuk — Hesapla + PDF
+# HESAPLA + PDF — Sekmeler dışında, her zaman görünür
 # ─────────────────────────────────────────────────────────────────────────────
 st.divider()
 foot1, foot2, foot3 = st.columns([3, 1, 1])
@@ -741,7 +641,7 @@ foot1, foot2, foot3 = st.columns([3, 1, 1])
 with foot1:
     n_f = len(st.session_state.faaliyetler)
     if n_f:
-        st.caption(f"📋  {n_f} faaliyet girildi. Hesaplamak için **HESAPLA** butonuna basın.")
+        st.caption(f"📋  {n_f} faaliyet girildi.")
     else:
         st.caption("📋  Henüz faaliyet eklenmedi. '2 · Faaliyetler' sekmesinden ekleyin.")
 
@@ -751,9 +651,8 @@ with foot2:
             st.error("Önce en az bir faaliyet ekleyin.")
         else:
             aday = _aday_olustur()
-            st.session_state.son_aday         = aday
-            st.session_state.sonuc            = t.kriter_kontrol(aday)
-            st.session_state.switch_to_results = True
+            st.session_state.son_aday = aday
+            st.session_state.sonuc    = t.kriter_kontrol(aday)
             st.rerun()
 
 with foot3:
@@ -770,3 +669,85 @@ with foot3:
             )
         else:
             st.caption("PDF için: `pip install reportlab`")
+
+# ═══════════════════════════════════════ SONUÇLAR ════════════════════════════
+sonuc    = st.session_state.sonuc
+son_aday = st.session_state.son_aday
+
+if sonuc is not None and son_aday is not None:
+    st.divider()
+    pnlar = sonuc["puanlar"]
+    genel = sonuc["genel_sonuc"]
+
+    kadro_adi_tam = {
+        "dr_ilk":     "Dr. Öğretim Üyesi – İlk Atanma",
+        "dr_yeniden": f"Dr. Öğretim Üyesi – Yeniden Atanma ({son_aday.yeniden_sure} Yıl)",
+        "docent":     "Doçent",
+        "profesor":   "Profesör",
+    }.get(son_aday.kadro_turu, "–")
+
+    # ── Genel sonuç bandı ────────────────────────────────────────────────────
+    gtxt = ("✓  TÜM KRİTERLER SAĞLANIYOR – BAŞVURU YAPILABİLİR"
+            if genel else
+            "✗  BAZI KRİTERLER SAĞLANMIYOR – BAŞVURU YAPILAMAZ")
+    st.markdown(
+        f'<div class="{"sonuc-ok" if genel else "sonuc-fail"}">{gtxt}</div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── Aday özeti ───────────────────────────────────────────────────────────
+    sc1, sc2, sc3, sc4 = st.columns(4)
+    sc1.metric("Aday",  son_aday.ad_soyad)
+    sc2.metric("Alan",  son_aday.alan)
+    sc3.metric("Kadro", kadro_adi_tam)
+    sc4.metric("Tarih", datetime.date.today().strftime("%d.%m.%Y"))
+
+    st.divider()
+
+    # ── Puan özeti ───────────────────────────────────────────────────────────
+    pc1, pc2, pc3 = st.columns(3)
+    pc1.metric("PUAN-1  (EK-2: 1.1–1.6 kapsamı)", f"{pnlar['puan1']:.2f}")
+    pc2.metric("PUAN-2  (EK-2 tamamı – kalan)",   f"{pnlar['puan2']:.2f}")
+    pc3.metric("TOPLAM PUAN",                      f"{pnlar['toplam']:.2f}")
+
+    st.divider()
+
+    # ── Kriter kontrol ───────────────────────────────────────────────────────
+    st.subheader("Kriter Kontrol Sonuçları")
+    for kr in sonuc["kriterler"]:
+        ok        = "✓" in kr["durum"]
+        info_only = "(f) Bilgi:" in kr["kriter"]
+        if info_only:
+            css, icon = "kriter-info", "ℹ️"
+        elif ok:
+            css, icon = "kriter-ok",  "✓"
+        else:
+            css, icon = "kriter-fail", "✗"
+        not_str = (f"  <small style='color:#555'>({kr['notlar']})</small>"
+                   if kr["notlar"] else "")
+        st.markdown(
+            f'<div class="{css}"><b>{icon}</b>&nbsp;&nbsp;{kr["kriter"]}{not_str}</div>',
+            unsafe_allow_html=True,
+        )
+
+    st.divider()
+
+    # ── Faaliyet detayı ──────────────────────────────────────────────────────
+    st.subheader("Faaliyet Detayı")
+    drows = [
+        {
+            "Kod":      d["kod"],
+            "Faaliyet": d["ad"][:65],
+            "Adet":     d["adet"],
+            "Puan":     round(d["puan"], 2),
+            "Tür":      "PUAN-1" if d["puan1_mi"] else "PUAN-2",
+        }
+        for d in pnlar["detaylar"]
+    ]
+    if drows:
+        ddf = pd.DataFrame(drows)
+        st.dataframe(
+            ddf.style.map(_tur_renk, subset=["Tür"]),
+            use_container_width=True,
+            height=min(420, 50 + 36 * len(drows)),
+        )
