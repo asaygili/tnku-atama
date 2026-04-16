@@ -13,6 +13,7 @@ import os
 import datetime
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 import tnku_atama as t
 
 # ── PDF kütüphanesi ──────────────────────────────────────────────────────────
@@ -78,6 +79,8 @@ if "sonuc" not in st.session_state:
     st.session_state.sonuc = None
 if "son_aday" not in st.session_state:
     st.session_state.son_aday = None
+if "switch_to_results" not in st.session_state:
+    st.session_state.switch_to_results = False
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Sabitler
@@ -395,6 +398,18 @@ tab1, tab2, tab3 = st.tabs([
     "➕  2 · Faaliyetler",
     "📊  3 · Sonuçlar",
 ])
+
+# Hesapla sonrası Sonuçlar sekmesine otomatik geç
+if st.session_state.switch_to_results:
+    st.session_state.switch_to_results = False
+    components.html("""
+    <script>
+    setTimeout(function () {
+        const tabs = window.parent.document.querySelectorAll('[data-baseweb="tab"]');
+        if (tabs.length >= 3) tabs[2].click();
+    }, 150);
+    </script>
+    """, height=0)
 
 # ═══════════════════════════════════════ TAB 1 – ADAY BİLGİLERİ ══════════════
 with tab1:
@@ -736,8 +751,9 @@ with foot2:
             st.error("Önce en az bir faaliyet ekleyin.")
         else:
             aday = _aday_olustur()
-            st.session_state.son_aday = aday
-            st.session_state.sonuc    = t.kriter_kontrol(aday)
+            st.session_state.son_aday         = aday
+            st.session_state.sonuc            = t.kriter_kontrol(aday)
+            st.session_state.switch_to_results = True
             st.rerun()
 
 with foot3:
