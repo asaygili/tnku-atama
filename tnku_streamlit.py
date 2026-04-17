@@ -1349,117 +1349,100 @@ with tab2:
             )
 
 
-        sel_no = st.number_input(
-            "Düzenlenecek faaliyet # numarası",
-            min_value=1, max_value=len(flist), step=1,
-            key="v_sel_idx")
-        idx_sel = int(sel_no) - 1
-        f_sel = st.session_state.faaliyetler[idx_sel]
-
-        act1, act2, act3, act4 = st.columns([1,1,1,1])
-
-        with act1:
-            st.info(f"#{idx_sel+1} düzenleniyor", icon="✏️")
-
-        with act2:
-            if st.button("🗑  Sil", use_container_width=True):
-                st.session_state.faaliyetler.pop(idx_sel)
-                st.rerun()
-
-        with act3:
-            if st.button("🗑  Tümünü Temizle", use_container_width=True):
+        # ── Seçim + Düzenleme ───────────────────────────────────────────
+        # Sil butonları
+        sil_col1, sil_col2 = st.columns([1, 3])
+        with sil_col1:
+            if st.button("🗑 Tümünü Temizle"):
                 st.session_state.faaliyetler = []
                 st.rerun()
 
-        with act4:
-            st.write("")
+        st.divider()
 
-        # ── Düzenleme formu ─ her zaman seçili satırı göster ───────────
-        if True:
-            didx = idx_sel  # doğrudan number_input'tan al
-            # didx değişince eski widget state'lerini temizle
-            if st.session_state.get("_son_didx") != didx:
-                for _k in list(st.session_state.keys()):
-                    if _k.startswith("v_d_") and not _k.endswith(f"_{didx}"):
-                        del st.session_state[_k]
-                st.session_state["_son_didx"] = didx
-            if didx < len(st.session_state.faaliyetler):
-                f_d = st.session_state.faaliyetler[didx]
-                bilgi_d = t.EK2_PUANLAR.get(f_d.kod, {})
-                st.divider()
-                bilgi_d_ad = bilgi_d.get("ad","")
-                st.markdown(
-                    f"### ✏️ #{didx+1} — {f_d.kod}  "
-                    f"<span style='color:#64748b;font-size:0.8em'>{bilgi_d_ad[:70]}</span>",
-                    unsafe_allow_html=True)
+        # Her faaliyet için expander: tek tıkla açılır, içinde form
+        for didx, f_d in enumerate(st.session_state.faaliyetler):
+            bilgi_d    = t.EK2_PUANLAR.get(f_d.kod, {})
+            bilgi_d_ad = bilgi_d.get("ad", "")
+            kunye_d    = getattr(f_d, "_kunye", "") or ""
+            p_f, _     = t.faaliyet_puan_hesapla(f_d)
+            ozet = kunye_d[:60] if kunye_d else bilgi_d_ad[:60]
 
-                # Künye düzenleme
-                kunye_d = getattr(f_d, "_kunye", "") or ""
+            with st.expander(
+                f"**#{didx+1}** · `{f_d.kod}` · {ozet}… "
+                f"  ➤ *{p_f:.2f} puan*",
+                expanded=False,
+            ):
+                # Künye
                 yeni_kunye = st.text_area(
                     "📄 Künye",
                     value=kunye_d,
                     height=68,
+                    key=f"kny_{didx}",
                     placeholder="Yazar(lar), Başlık, Dergi/Yayınevi, Yıl...",
-                    key=f"v_d_kunye_{didx}"
                 )
 
-                dc1, dc2, dc3 = st.columns([2,1,1])
+                dc1, dc2, dc3 = st.columns([2, 1, 1])
                 with dc1:
+                    kod_list = list(t.EK2_PUANLAR.keys())
                     yeni_kod = st.selectbox(
                         "EK-2 Kodu",
-                        options=list(t.EK2_PUANLAR.keys()),
-                        index=list(t.EK2_PUANLAR.keys()).index(f_d.kod)
-                              if f_d.kod in t.EK2_PUANLAR else 0,
+                        options=kod_list,
+                        index=kod_list.index(f_d.kod) if f_d.kod in kod_list else 0,
                         format_func=lambda k: f"{k} – {t.EK2_PUANLAR[k]['ad'][:50]}",
-                        key=f"v_d_kod_{didx}")
+                        key=f"kod_{didx}",
+                    )
                 with dc2:
-                    yeni_adet = st.number_input("Adet", min_value=1,
-                        value=f_d.adet, key=f"v_d_adet_{didx}")
+                    yeni_adet = st.number_input(
+                        "Adet", min_value=1, value=f_d.adet, key=f"adt_{didx}")
                 with dc3:
-                    yeni_q = st.selectbox("Q Değeri",
-                        options=["", "Q1","Q2","Q3","Q4"],
-                        index=["","Q1","Q2","Q3","Q4"].index(f_d.q_degeri or ""),
-                        key=f"v_d_q_{didx}")
+                    yeni_q = st.selectbox(
+                        "Q Değeri",
+                        options=["", "Q1", "Q2", "Q3", "Q4"],
+                        index=["", "Q1", "Q2", "Q3", "Q4"].index(f_d.q_degeri or ""),
+                        key=f"q_{didx}",
+                    )
 
-                dd1, dd2, dd3 = st.columns([1,1,2])
+                dd1, dd2, dd3 = st.columns([1, 1, 2])
                 with dd1:
-                    yeni_top_yz = st.number_input("Toplam Yazar",
-                        min_value=1, value=f_d.toplam_yazar, key=f"v_d_tyz_{didx}")
+                    yeni_tyz = st.number_input(
+                        "Toplam Yazar", min_value=1,
+                        value=f_d.toplam_yazar, key=f"tyz_{didx}")
                 with dd2:
-                    yeni_sira = st.number_input("Yazar Sırası",
-                        min_value=1, value=f_d.yazar_sirasi, key=f"v_d_sira_{didx}")
+                    yeni_sira = st.number_input(
+                        "Yazar Sırası", min_value=1,
+                        value=f_d.yazar_sirasi, key=f"sra_{didx}")
                 with dd3:
-                    yeni_sorumlu = st.checkbox("Sorumlu/Senyör Yazar",
-                        value=f_d.sorumlu_veya_senyör, key=f"v_d_sor_{didx}")
+                    yeni_sor = st.checkbox(
+                        "Sorumlu/Senyör Yazar",
+                        value=f_d.sorumlu_veya_senyör, key=f"sor_{didx}")
 
-                # Patent durumu
                 yeni_pd = f_d.patent_durum
-                if yeni_kod in ("11.1","11.7"):
-                    yeni_pd = st.radio("Patent Durumu",
-                        options=["tescilli","arastirma_raporu","basvuru"],
+                if yeni_kod in ("11.1", "11.7"):
+                    yeni_pd = st.radio(
+                        "Patent Durumu",
+                        options=["tescilli", "arastirma_raporu", "basvuru"],
                         index=["tescilli","arastirma_raporu","basvuru"].index(
                             f_d.patent_durum or "tescilli"),
-                        horizontal=True, key=f"v_d_pd_{didx}")
+                        horizontal=True, key=f"pd_{didx}")
 
-                db1, db2 = st.columns(2)
-                with db1:
-                    if st.button("💾 Kaydet", type="primary",
-                                 use_container_width=True, key=f"v_d_kaydet_{didx}"):
+                btn1, btn2 = st.columns(2)
+                with btn1:
+                    if st.button("💾 Kaydet", key=f"kyt_{didx}",
+                                 type="primary", use_container_width=True):
                         f_d.kod               = yeni_kod
                         f_d.adet              = int(yeni_adet)
-                        f_d.toplam_yazar      = int(yeni_top_yz)
+                        f_d.toplam_yazar      = int(yeni_tyz)
                         f_d.yazar_sirasi      = int(yeni_sira)
-                        f_d.sorumlu_veya_senyör = yeni_sorumlu
+                        f_d.sorumlu_veya_senyör = yeni_sor
                         f_d.q_degeri          = yeni_q or None
                         f_d.patent_durum      = yeni_pd
                         f_d._kunye            = yeni_kunye.strip()
                         st.rerun()
-                with db2:
-                    if st.button("❌ İptal", use_container_width=True,
-                                 key=f"v_d_iptal_{didx}"):
-                        st.rerun()  # Sadece sayfayı yenile
-    else:
-        st.info("Henüz faaliyet eklenmedi. Sol taraftan kategori seçip faaliyet ekleyin.")
+                with btn2:
+                    if st.button("🗑 Sil", key=f"sil_{didx}",
+                                 use_container_width=True):
+                        st.session_state.faaliyetler.pop(didx)
+                        st.rerun()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HESAPLA + PDF çubuğu
