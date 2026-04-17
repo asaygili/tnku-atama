@@ -1348,16 +1348,10 @@ with tab2:
                 height=min(420, 50 + 36 * len(rows)),
             )
 
-        # Seçim numarası - tıklama yoksa number_input'tan al
-        duzenle_idx_var = st.session_state.get("_duzenle_idx")
-        if duzenle_idx_var is not None and st.session_state.get("_duzenle_ac"):
-            sel_no_val = duzenle_idx_var + 1
-        else:
-            sel_no_val = 1
+
         sel_no = st.number_input(
-            "İşlem yapılacak # numarası",
+            "Düzenlenecek faaliyet # numarası",
             min_value=1, max_value=len(flist), step=1,
-            value=min(sel_no_val, len(flist)),
             key="v_sel_idx")
         idx_sel = int(sel_no) - 1
         f_sel = st.session_state.faaliyetler[idx_sel]
@@ -1365,7 +1359,7 @@ with tab2:
         act1, act2, act3, act4 = st.columns([1,1,1,1])
 
         with act1:
-            st.write("")  # Form her zaman açık - düzenle butonu gerekmiyor
+            st.info(f"#{idx_sel+1} düzenleniyor", icon="✏️")
 
         with act2:
             if st.button("🗑  Sil", use_container_width=True):
@@ -1383,14 +1377,20 @@ with tab2:
         # ── Düzenleme formu ─ her zaman seçili satırı göster ───────────
         if True:
             didx = idx_sel  # doğrudan number_input'tan al
+            # didx değişince eski widget state'lerini temizle
+            if st.session_state.get("_son_didx") != didx:
+                for _k in list(st.session_state.keys()):
+                    if _k.startswith("v_d_") and not _k.endswith(f"_{didx}"):
+                        del st.session_state[_k]
+                st.session_state["_son_didx"] = didx
             if didx < len(st.session_state.faaliyetler):
                 f_d = st.session_state.faaliyetler[didx]
                 bilgi_d = t.EK2_PUANLAR.get(f_d.kod, {})
                 st.divider()
                 bilgi_d_ad = bilgi_d.get("ad","")
                 st.markdown(
-                    f"**✏️ #{didx+1} numaralı faaliyet düzenleniyor**  "
-                    f"<span style='color:#64748b;font-size:0.85em'>{f_d.kod} – {bilgi_d_ad[:60]}</span>",
+                    f"### ✏️ #{didx+1} — {f_d.kod}  "
+                    f"<span style='color:#64748b;font-size:0.8em'>{bilgi_d_ad[:70]}</span>",
                     unsafe_allow_html=True)
 
                 # Künye düzenleme
