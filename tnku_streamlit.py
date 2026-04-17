@@ -83,63 +83,69 @@ try:
     def _yazar_sirasi_bul(metin: str, isim: str):
         """
         Künye metninden yazar listesini ve aranan kişinin sırasını bul.
-
-        Kural:
-        - Yazarlar virgülle ayrılmış, SOYAD AD veya Ad Soyad formatında
-        - Yazar adları: tümü büyük VEYA title case, 1-4 kelime, bağlaç yok
-        - Yazar listesi bitişi: makale/bildiri başlığının başladığı yer
-          (ilk harf büyük, devamı küçük kelimeler → başlık başlıyor)
+        Büyük harf, küçük harf ve karışık harf formatlarını destekler.
         """
         if not isim or not metin:
             return 1, 1, False
 
         BAG = {'a','an','the','in','of','and','or','for','with','by',
-               've','ile','bir','bu','da','de','to','on','at','is','as'}
+               've','ile','bir','bu','da','de','to','on','at','is','as',
+               'using','based','via','from','through'}
+
+        def _normalize(m):
+            """Metin tamamen küçük harfse title case'e çevir."""
+            harfler = [c for c in m if c.isalpha()]
+            if not harfler:
+                return m
+            buyuk_oran = sum(1 for c in harfler if c.isupper()) / len(harfler)
+            if buyuk_oran < 0.1:  # %10'dan az büyük harf → tamamen küçük
+                parcalar = m.split(',')
+                yeni = []
+                for p in parcalar:
+                    p = p.strip()
+                    kelimeler = [k[0].upper() + k[1:] if k else k for k in p.split()]
+                    yeni.append(' '.join(kelimeler))
+                return ', '.join(yeni)
+            return m
 
         def _yazar_mi(parca):
-            """Verilen virgül parçası yazar mı yoksa başlık/dergi mi?"""
             p = parca.strip()
             if not p or len(p) < 2:
                 return False
-            # Rakam veya nokta ile başlıyorsa yazar değil
             if p[0].isdigit() or p[0] in '.([':
                 return False
-            # vol, pp, no gibi kısaltmalar
-            if _re_aves.match(r'^(vol|pp|no|doi|isbn|issn|s[.]|p[.])', p.lower()):
+            if _re_aves.match(r'^(vol|pp|no|doi|isbn|issn)', p.lower()):
                 return False
             kelimeler = p.split()
-            if len(kelimeler) > 5:   # çok kelime → başlık
+            if len(kelimeler) > 5:
                 return False
-            # Bağlaç/edat kelimesi varsa başlık
             if any(k.lower() in BAG for k in kelimeler):
                 return False
-            # Küçük harf kelime varsa (yazar değil, başlık kelimesi)
-            kucuk = [k for k in kelimeler
-                     if len(k) > 1 and k[0].islower() and k.lower() not in BAG]
-            if kucuk:
+            # Küçük harfle başlayan kelime varsa başlık
+            kucuk_baslayan = [k for k in kelimeler if len(k) > 1 and k[0].islower()]
+            if kucuk_baslayan:
                 return False
-            # En az 1 tamamen büyük veya title case kelime
             buyuk = sum(1 for k in kelimeler
                         if len(k) > 1 and (k == k.upper() or k[0].isupper()))
             return buyuk >= 1
 
-        parcalar = [p.strip() for p in metin.split(',')]
+        metin_n = _normalize(metin)
+        parcalar = [p.strip() for p in metin_n.split(',')]
         yazarlar = []
         for p in parcalar:
             if _yazar_mi(p):
                 yazarlar.append(p)
             else:
-                break   # ilk yazar-olmayan parça → liste bitti
+                break
 
         if not yazarlar:
             return 1, 1, False
 
-        # Aranan ismi bul
         def _norm(s):
             return _re_aves.sub(r'\s+', ' ', s.upper().strip())
 
-        isim_norm    = _norm(isim)
-        isim_parts   = [p for p in isim_norm.split() if len(p) > 2]
+        isim_norm  = _norm(isim)
+        isim_parts = [p for p in isim_norm.split() if len(p) > 2]
 
         for si, yazar in enumerate(yazarlar, 1):
             yazar_norm = _norm(yazar)
@@ -147,7 +153,6 @@ try:
                 return si, len(yazarlar), False
             if sum(1 for p in isim_parts if p in yazar_norm) >= min(2, len(isim_parts)):
                 return si, len(yazarlar), False
-            # Tek parça isim (soyad veya ad)
             if len(isim_parts) == 1 and isim_parts[0] in yazar_norm:
                 return si, len(yazarlar), False
 
