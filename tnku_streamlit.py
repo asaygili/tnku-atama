@@ -1153,88 +1153,29 @@ tab1, tab2 = st.tabs([
 
 # ═══════════════════════════════════════ TAB 1 – ADAY BİLGİLERİ ══════════════
 with tab1:
+
+    # ── 1. Ad Soyad + AVES URL ───────────────────────────────────────────────
+    st.markdown('<div class="card-title">KİMLİK BİLGİLERİ</div>',
+                unsafe_allow_html=True)
+    ki1, ki2 = st.columns(2, gap="medium")
+    with ki1:
+        st.text_input("Ad Soyad", key="v_ad", placeholder="Adınız Soyadınız")
+    with ki2:
+        st.text_input(
+            "AVES CV URL",
+            key="v_aves_url",
+            placeholder="asaygili.cv.nku.edu.tr",
+            help="AVES profil adresiniz. Faaliyetleri otomatik yüklemek için kullanılır."
+        )
+
+    st.divider()
+
+    # ── 2. Akademik Alan + Kadro Türü ────────────────────────────────────────
     col_kimlik, col_kadro = st.columns([1, 1], gap="large")
 
     with col_kimlik:
-        st.markdown('<div class="card-title">KİMLİK BİLGİLERİ</div>',
+        st.markdown('<div class="card-title">AKADEMİK ALAN</div>',
                     unsafe_allow_html=True)
-        st.text_input("Ad Soyad", key="v_ad", placeholder="Adınız Soyadınız")
-
-        # ── AVES Otomatik Yükle ──────────────────────────────────────────────
-        with st.expander("🔗  AVES Verisinden Otomatik Yükle", expanded=False):
-            st.caption(
-                "AVES CV adresinizi girin (örn: **asaygili.cv.nku.edu.tr**). "
-                "Yayınlar, projeler ve patentler otomatik olarak çekilir."
-            )
-            aves_url_v = st.text_input(
-                "AVES CV URL",
-                key="v_aves_url",
-                placeholder="asaygili.cv.nku.edu.tr",
-            )
-            aves_isim_v = st.text_input(
-                "Ad Soyad (yazar sırası için)",
-                key="v_aves_isim",
-                placeholder="Örn: Ahmet SAYGILI",
-            )
-
-            # Debug: bağlantı testi
-            if st.button("🔍 Bağlantı Test Et", use_container_width=False):
-                url_t = (aves_url_v or "").strip()
-                if url_t:
-                    base_t = url_t.rstrip("/")
-                    if not base_t.startswith("http"):
-                        base_t = "http://" + base_t
-                    try:
-                        import requests as _rtest
-                        r_t = _rtest.get(base_t + "/", timeout=8)
-                        st.success(f"✅ Bağlantı başarılı! Status: {r_t.status_code}, Cookie: {bool(r_t.cookies)}")
-                    except Exception as _et:
-                        st.error(f"❌ Bağlantı hatası: {_et}")
-                else:
-                    st.warning("URL boş")
-
-            col_aves1, col_aves2 = st.columns(2)
-            with col_aves1:
-                if st.button("⚡ Yükle ve Ekle", type="primary",
-                             use_container_width=True,
-                             help="AVES verisini otomatik çekip listeye ekler"):
-                    url  = (aves_url_v or "").strip()
-                    isim = (aves_isim_v or "").strip()
-                    if not url:
-                        st.error("CV URL boş olamaz.")
-                    else:
-                        with st.spinner("AVES verisi yükleniyor..."):
-                            try:
-                                yeni = aves_faaliyete_donustur(url, isim)
-                                if not AVES_OK:
-                                    st.error("requests veya bs4 eksik: pip install requests beautifulsoup4")
-                            except Exception as _ex:
-                                st.error(f"Hata: {_ex}")
-                                if _aves_son_hata[0]:
-                                    st.error(f"Detay: {_aves_son_hata[0]}")
-                                yeni = []
-                        if yeni:
-                            st.session_state.faaliyetler.extend(yeni)
-                            st.success(f"✅ {len(yeni)} faaliyet eklendi!")
-                            st.rerun()
-                        else:
-                            st.warning(
-                                f"AVES'ten {len(yeni)} faaliyet çekildi ancak "
-                                "yayın/proje verisi bulunamadı. "
-                                "URL formatı: asaygili.cv.nku.edu.tr"
-                            )
-            with col_aves2:
-                if st.button("🗑 Tüm Otomatik Verileri Temizle",
-                             use_container_width=True,
-                             help="Sadece otomatik eklenen faaliyetleri siler"):
-                    onceki = len(st.session_state.faaliyetler)
-                    # Otomatik eklenenleri tespit etmek için session'da işaret tut
-                    manuel = st.session_state.get("_manuel_faaliyetler", [])
-                    st.session_state.faaliyetler = list(manuel)
-                    silinen = onceki - len(st.session_state.faaliyetler)
-                    st.info(f"{silinen} otomatik faaliyet temizlendi.")
-                    st.rerun()
-        # ── /AVES ────────────────────────────────────────────────────────────
         st.selectbox("Akademik Alan", key="v_alan", options=[
             "ALAN-1  –  Fen / Sağlık / Müh. / Matematik vb.",
             "ALAN-2  –  Sosyal / İdari / Eğitim / Güzel Sanatlar vb.",
@@ -1266,18 +1207,20 @@ with tab1:
             )
 
     st.divider()
+
+    # ── 3. Genel Koşullar ────────────────────────────────────────────────────
     st.markdown('<div class="card-title">GENEL KOŞULLAR</div>',
                 unsafe_allow_html=True)
 
     gc1, gc2, gc3 = st.columns(3, gap="medium")
     with gc1:
         st.checkbox("Doktora / Uzmanlık / Yeterlilik", key="v_doktora",
-                    help="Tıp uzm., Diş Hek. uzm., Eczacılık uzm. veya Güzel Sanatlar yeterlilik")
+                    help="Tıp uzm., Diş Hek. uzm., Eczacılık uzm. veya Güzel Sanatlar yeterlilik belgesi")
         st.checkbox("ÜAK Doçent unvanı", key="v_uak",
                     help="Üniversitelerarası Kuruldan alınmış doçentlik unvanı")
     with gc2:
         st.checkbox("ÜAK sözlü sınavı başarılı", key="v_sifahi",
-                    help="Doçent için zorunlu · Profesör'de işaretlenmezse puan eşikleri %20 artar")
+                    help="Doçent için zorunlu · Profesör'de işaretlenmezse puan eşikleri %80'e düşer")
         st.checkbox("Örnek ders 'Başarılı'", key="v_ornek",
                     help="Dr. Öğr. Üyesi için zorunlu; sözlü sınavsız Profesör için de zorunlu")
     with gc3:
@@ -1287,6 +1230,8 @@ with tab1:
                     help="Bu durumda YÖKDİL/YDS puanı ≥85 aranır")
 
     st.divider()
+
+    # ── 4. Sayısal Bilgiler ──────────────────────────────────────────────────
     st.markdown('<div class="card-title">SAYISAL BİLGİLER</div>',
                 unsafe_allow_html=True)
     dl1, dl2, dl3 = st.columns(3, gap="medium")
@@ -1303,6 +1248,70 @@ with tab1:
                         min_value=0.0, max_value=40.0, step=0.5,
                         help="Prof. için ≥2.5 yıl gerekli")
 
+    st.divider()
+
+    # ── 5. AVES Otomatik Yükle ───────────────────────────────────────────────
+    st.markdown('<div class="card-title">AVES VERİSİNDEN OTOMATİK YÜKLE</div>',
+                unsafe_allow_html=True)
+    st.caption(
+        "Yukarıda girdiğiniz AVES URL'si kullanılır. "
+        "Yayınlar, bildiriler, projeler ve patentler otomatik yüklenir."
+    )
+
+    aves_url_v  = st.session_state.get("v_aves_url", "")
+    aves_isim_v = st.session_state.get("v_ad", "")
+
+    ba1, ba2, ba3 = st.columns([2, 2, 1])
+    with ba1:
+        if st.button("⚡ Yükle ve Ekle", type="primary",
+                     use_container_width=True,
+                     help="AVES verisini otomatik çekip listeye ekler"):
+            url  = (aves_url_v or "").strip()
+            isim = (aves_isim_v or "").strip()
+            if not url:
+                st.error("Önce AVES CV URL'sini girin.")
+            else:
+                with st.spinner("AVES verisi yükleniyor..."):
+                    try:
+                        yeni = aves_faaliyete_donustur(url, isim)
+                        if not AVES_OK:
+                            st.error("requests veya bs4 eksik: pip install requests beautifulsoup4")
+                    except Exception as _ex:
+                        st.error(f"Hata: {_ex}")
+                        if _aves_son_hata[0]:
+                            st.error(f"Detay: {_aves_son_hata[0]}")
+                        yeni = []
+                if yeni:
+                    st.session_state.faaliyetler.extend(yeni)
+                    st.success(f"✅ {len(yeni)} faaliyet eklendi!")
+                    st.rerun()
+                else:
+                    st.warning(
+                        f"AVES'ten veri çekilemedi. "
+                        "URL formatı: asaygili.cv.nku.edu.tr"
+                    )
+    with ba2:
+        if st.button("🗑 Otomatik Verileri Temizle",
+                     use_container_width=True):
+            onceki = len(st.session_state.faaliyetler)
+            st.session_state.faaliyetler = []
+            st.info(f"{onceki} faaliyet temizlendi.")
+            st.rerun()
+    with ba3:
+        if st.button("🔍 Bağlantı Test Et", use_container_width=True):
+            url_t = (aves_url_v or "").strip()
+            if url_t:
+                base_t = url_t.rstrip("/")
+                if not base_t.startswith("http"):
+                    base_t = "http://" + base_t
+                try:
+                    import requests as _rtest
+                    r_t = _rtest.get(base_t + "/", timeout=8)
+                    st.success(f"✅ Status: {r_t.status_code}")
+                except Exception as _et:
+                    st.error(f"❌ {_et}")
+            else:
+                st.warning("AVES URL boş")
 # ═══════════════════════════════════════ TAB 2 – FAALİYETLER ════════════════
 with tab2:
     left_col, right_col = st.columns([1, 3], gap="large")
