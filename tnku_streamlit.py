@@ -17,6 +17,212 @@ import streamlit as st
 import streamlit.components.v1 as components
 import tnku_atama as t
 
+# ── AVES Otomatik Yükleme ────────────────────────────────────────────────────
+try:
+    import sys as _sys, os as _os, json as _json, hashlib as _hashlib, re as _re_aves
+
+    def _aves_data_dir():
+        """cv_scraper'ın veri dizinini bul."""
+        script_dir = _os.path.dirname(_os.path.abspath(__file__))
+        for candidate in [
+            _os.path.join(script_dir, "cv_data"),
+            _os.path.join(script_dir, "..", "cv_data"),
+            r"C:\Users\asayg\OneDrive\Desktop\files2\cv_data",
+        ]:
+            if _os.path.exists(candidate):
+                return candidate
+        return None
+
+    def _aves_yukle_cv(cv_url: str) -> dict:
+        """cv_url için yerel JSON'ı yükle."""
+        data_dir = _aves_data_dir()
+        if not data_dir or not cv_url:
+            return {}
+        key = _hashlib.md5(cv_url.encode()).hexdigest()[:12]
+        path = _os.path.join(data_dir, f"{key}.json")
+        if _os.path.exists(path):
+            try:
+                return _json.load(open(path, encoding="utf-8"))
+            except Exception:
+                return {}
+        return {}
+
+    def _aves_scholar_yukle(cv_url: str) -> dict:
+        """Scholar verisini yükle."""
+        script_dir = _os.path.dirname(_os.path.abspath(__file__))
+        scholar_dir = None
+        for candidate in [
+            _os.path.join(script_dir, "scholar_data"),
+            _os.path.join(script_dir, "..", "scholar_data"),
+            r"C:\Users\asayg\OneDrive\Desktop\files2\scholar_data",
+        ]:
+            if _os.path.exists(candidate):
+                scholar_dir = candidate
+                break
+        if not scholar_dir or not cv_url:
+            return {}
+        key = _hashlib.md5(cv_url.encode()).hexdigest()[:12]
+        path = _os.path.join(scholar_dir, f"{key}.json")
+        if _os.path.exists(path):
+            try:
+                return _json.load(open(path, encoding="utf-8"))
+            except Exception:
+                return {}
+        return {}
+
+    def _aves_q_bul(metin: str) -> str | None:
+        """Dergi Q değerini metin içinden veya scimago/jcr cache'den tahmin et."""
+        # Basit keyword tabanlı Q tahmini
+        m_low = metin.lower()
+        if "q1" in m_low: return "Q1"
+        if "q2" in m_low: return "Q2"
+        if "q3" in m_low: return "Q3"
+        if "q4" in m_low: return "Q4"
+        return None
+
+    def _yazar_sirasi_bul(metin: str, isim: str):
+        """Metinde isim ara, yazar sırasını döndür."""
+        if not isim or not metin:
+            return 1, 1, False
+        isim_parcalari = [p.lower() for p in isim.split() if len(p) > 2]
+        yazarlar = _re_aves.split(r"[;,]", metin[:400])
+        for si, yazar in enumerate(yazarlar, 1):
+            if any(p in yazar.strip().lower() for p in isim_parcalari):
+                return si, max(len(yazarlar), si), False
+        return 1, max(len(yazarlar), 1), False
+
+    def _makale_kod(endeksler: list, metin: str = "") -> str:
+        eks = " ".join(endeksler).upper()
+        m = metin.lower()
+        if any(x in eks for x in ("SCI-EXPANDED","SCI-E","SSCI","AHCI")):
+            if "derleme" in m or "review" in m: return "1.3"
+            if "teknik not" in m or "editöre" in m: return "1.2"
+            return "1.1"
+        if "ESCI" in eks or "SCOPUS" in eks: return "1.4"
+        if "TRDIZIN" in eks or "TR DİZİN" in eks:
+            return "1.6" if "ulusal" in m else "1.6"
+        if any(x in eks for x in ("EBSCO","DOAJ","DRJI")): return "1.5"
+        return "1.7"
+
+    def aves_faaliyete_donustur(cv_url: str, isim: str) -> list[t.Faaliyet]:
+        """AVES verisini t.Faaliyet listesine dönüştür."""
+        veri  = _aves_yukle_cv(cv_url)
+        sch   = _aves_scholar_yukle(cv_url)
+        if not veri and not sch:
+            return []
+
+        faaliyetler = []
+        ekle = faaliyetler.append
+
+        # 1. Makaleler
+        for kat_key in ("ulusl_makale", "ulusal_makale"):
+            blok = veri.get(kat_key)
+            if not blok: continue
+            for o in blok.get("ogeler", []):
+                metin  = o.get("metin", "")
+                endeks = o.get("endeks", []) or []
+                q      = o.get("q") or _aves_q_bul(metin)
+                si, toplam, sorumlu = _yazar_sirasi_bul(metin, isim)
+                if kat_key == "ulusal_makale":
+                    eks_str = " ".join(endeks).upper()
+                    kod = "1.6" if "TRDIZIN" in eks_str or "TR DİZİN" in eks_str else "1.8"
+                    q   = None
+                else:
+                    kod = _makale_kod(endeks, metin)
+                ekle(t.Faaliyet(
+                    kod=kod, adet=1,
+                    toplam_yazar=toplam, yazar_sirasi=si,
+                    sorumlu_veya_senyör=sorumlu, q_degeri=q,
+                ))
+
+        # 2. Kitap / Bölüm
+        for kat_key in ("kitap_ulusl","kitap_ulusal","kitap_bolum"):
+            blok = veri.get(kat_key)
+            if not blok: continue
+            for o in blok.get("ogeler", []):
+                metin = o.get("metin","")
+                if "ulusl" in kat_key:
+                    kod = "2.4" if "bölüm" in kat_key else "2.2"
+                else:
+                    kod = "2.6" if "bölüm" in kat_key else "2.3"
+                si, toplam, sorumlu = _yazar_sirasi_bul(metin, isim)
+                ekle(t.Faaliyet(kod=kod, adet=1,
+                                toplam_yazar=toplam, yazar_sirasi=si,
+                                sorumlu_veya_senyör=sorumlu))
+
+        # 3. Bildiriler
+        for kat_key, ulusl in [("ulusl_bildiri",True),("ulusal_bildiri",False)]:
+            blok = veri.get(kat_key)
+            if not blok: continue
+            for o in blok.get("ogeler", []):
+                metin = o.get("metin","").lower()
+                if ulusl:
+                    kod = "3.3" if "özet" in metin or "abstract" in metin else                           "3.4" if "poster" in metin else "3.2"
+                else:
+                    kod = "3.7" if "özet" in metin else                           "3.8" if "poster" in metin else "3.6"
+                si, toplam, sorumlu = _yazar_sirasi_bul(metin, isim)
+                ekle(t.Faaliyet(kod=kod, adet=1,
+                                toplam_yazar=toplam, yazar_sirasi=si))
+
+        # 5. Atıf (Scholar)
+        atif   = int(sch.get("atif",0)    or 0)
+        hindex = int(sch.get("h_index",0) or 0)
+        if atif > 0:
+            ekle(t.Faaliyet(kod="5.1", adet=atif))
+        if hindex > 0:
+            ekle(t.Faaliyet(kod="5.9", adet=hindex))
+
+        # 11. Patent
+        PATENT_KW = {"patent","faydalı model","ep ","us ","wo ","pct","wipo"}
+        blok = veri.get("patent")
+        if blok:
+            for o in blok.get("ogeler", []):
+                metin = o.get("metin","")
+                m_low = metin.lower()
+                tip   = o.get("tip","")
+                if tip == "odul": continue
+                if tip == "patent" or any(k in m_low for k in PATENT_KW):
+                    if any(x in m_low for x in ("us ","ep ","wo ","pct","wipo")):
+                        kod, pd = "11.1", "tescilli"
+                    else:
+                        kod, pd = "11.2", "tescilli"
+                    if "başvuru" in m_low: pd = "basvuru"
+                    elif "araştırma" in m_low: pd = "arastirma_raporu"
+                    ekle(t.Faaliyet(kod=kod, adet=1, patent_durum=pd))
+
+        # 12. Proje
+        blok = veri.get("proje")
+        if blok:
+            for o in blok.get("ogeler", []):
+                m = o.get("metin","").lower()
+                yurt = any(x in m for x in ("yürütücü","koordinatör","pi "))
+                if "tubitak" in m or "tübitak" in m:
+                    kod = "12.5" if yurt else "12.6"
+                elif any(x in m for x in ("ab ","h2020","horizon","fp7","erasmus")):
+                    kod = "12.1" if yurt else "12.2"
+                elif "bap" in m:
+                    kod = "12.11" if yurt else "12.12"
+                else:
+                    kod = "12.13" if yurt else "12.14"
+                ekle(t.Faaliyet(kod=kod, adet=1))
+
+        # 17. Tez danışmanlığı
+        for gorev in (veri.get("_akademik_gorev") or []):
+            rol = gorev.get("unvan","").lower()
+            if "tez" in rol or "danışman" in rol:
+                kod = "17.1" if "doktora" in rol else "17.2"
+                ekle(t.Faaliyet(kod=kod, adet=1))
+
+        return faaliyetler
+
+    AVES_OK = True
+
+except Exception as _aves_ex:
+    AVES_OK = False
+    def aves_faaliyete_donustur(cv_url, isim):
+        return []
+
+
 # ── PDF kütüphanesi ──────────────────────────────────────────────────────────
 try:
     from reportlab.lib.pagesizes import A4
@@ -659,6 +865,57 @@ with tab1:
         st.markdown('<div class="card-title">KİMLİK BİLGİLERİ</div>',
                     unsafe_allow_html=True)
         st.text_input("Ad Soyad", key="v_ad", placeholder="Adınız Soyadınız")
+
+        # ── AVES Otomatik Yükle ──────────────────────────────────────────────
+        with st.expander("🔗  AVES Verisinden Otomatik Yükle", expanded=False):
+            st.caption(
+                "Rehber programında çekilen CV verilerini buraya otomatik yükleyin. "
+                "cv_url'yi AVES profilinden kopyalayın (örn: https://avesis.nku.edu.tr/kisi/...)."
+            )
+            aves_url_v = st.text_input(
+                "AVES CV URL",
+                key="v_aves_url",
+                placeholder="https://avesis.nku.edu.tr/kisi/...",
+            )
+            aves_isim_v = st.text_input(
+                "Ad Soyad (yazar sırası için)",
+                key="v_aves_isim",
+                placeholder="Örn: Ahmet SAYGILI",
+            )
+
+            col_aves1, col_aves2 = st.columns(2)
+            with col_aves1:
+                if st.button("⚡ Yükle ve Ekle", type="primary",
+                             use_container_width=True,
+                             help="AVES verisini otomatik çekip listeye ekler"):
+                    url  = (aves_url_v or "").strip()
+                    isim = (aves_isim_v or "").strip()
+                    if not url:
+                        st.error("CV URL boş olamaz.")
+                    else:
+                        with st.spinner("AVES verisi yükleniyor..."):
+                            yeni = aves_faaliyete_donustur(url, isim)
+                        if yeni:
+                            st.session_state.faaliyetler.extend(yeni)
+                            st.success(f"✅ {len(yeni)} faaliyet eklendi!")
+                            st.rerun()
+                        else:
+                            st.warning(
+                                "Veri bulunamadı. CV verisi daha önce çekilmiş olmalı. "
+                                "Rehber programında 'CV Çek' ve 'Scholar' butonlarına basın."
+                            )
+            with col_aves2:
+                if st.button("🗑 Tüm Otomatik Verileri Temizle",
+                             use_container_width=True,
+                             help="Sadece otomatik eklenen faaliyetleri siler"):
+                    onceki = len(st.session_state.faaliyetler)
+                    # Otomatik eklenenleri tespit etmek için session'da işaret tut
+                    manuel = st.session_state.get("_manuel_faaliyetler", [])
+                    st.session_state.faaliyetler = list(manuel)
+                    silinen = onceki - len(st.session_state.faaliyetler)
+                    st.info(f"{silinen} otomatik faaliyet temizlendi.")
+                    st.rerun()
+        # ── /AVES ────────────────────────────────────────────────────────────
         st.selectbox("Akademik Alan", key="v_alan", options=[
             "ALAN-1  –  Fen / Sağlık / Müh. / Matematik vb.",
             "ALAN-2  –  Sosyal / İdari / Eğitim / Güzel Sanatlar vb.",
