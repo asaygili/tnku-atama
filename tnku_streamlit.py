@@ -1320,7 +1320,7 @@ with tab2:
 
     if flist:
         rows = _faaliyet_satirlari(kadro_su)
-        df   = pd.DataFrame(rows).set_index("#")
+        df   = pd.DataFrame(rows)  # # sütunu tabloda görünür kalır
 
         # Satır seçimi: on_select ile tıklama → düzenleme formuna aktarır
         try:
