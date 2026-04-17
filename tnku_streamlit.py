@@ -42,6 +42,19 @@ st.set_page_config(
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Google Analytics
+# ─────────────────────────────────────────────────────────────────────────────
+st.markdown("""
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-QJFQV27KN5"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-QJFQV27KN5');
+</script>
+""", unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────────────────────────────────────
 # CSS  (Google Fonts → Türkçe karakter desteği + responsive tasarım)
 # ─────────────────────────────────────────────────────────────────────────────
 st.markdown("""
