@@ -51,9 +51,11 @@ components.html("""
   window.dataLayer = window.dataLayer || [];
   function gtag(){dataLayer.push(arguments);}
   gtag('js', new Date());
-  gtag('config', 'G-QJFQV27KN5');
+  gtag('config', 'G-QJFQV27KN5', {
+    'page_location': 'https://tnku-atama.streamlit.app'
+  });
 </script>
-""", height=0)
+""", height=1)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CSS  (Google Fonts → Türkçe karakter desteği + responsive tasarım)
