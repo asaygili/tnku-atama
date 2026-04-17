@@ -290,11 +290,13 @@ try:
                     q   = None
                 else:
                     kod = _makale_kod(endeks, metin)
-                ekle(t.Faaliyet(
+                f_obj = t.Faaliyet(
                     kod=kod, adet=1,
                     toplam_yazar=toplam, yazar_sirasi=si,
                     sorumlu_veya_senyör=sorumlu, q_degeri=q,
-                ))
+                )
+                f_obj._kunye = metin[:300]
+                ekle(f_obj)
 
         # 2. Kitap / Bölüm
         for kat_key in ("kitap_ulusl","kitap_ulusal","kitap_bolum"):
@@ -307,9 +309,11 @@ try:
                 else:
                     kod = "2.6" if "bölüm" in kat_key else "2.3"
                 si, toplam, sorumlu = _yazar_sirasi_bul(metin, isim)
-                ekle(t.Faaliyet(kod=kod, adet=1,
+                f_obj2 = t.Faaliyet(kod=kod, adet=1,
                                 toplam_yazar=toplam, yazar_sirasi=si,
-                                sorumlu_veya_senyör=sorumlu))
+                                sorumlu_veya_senyör=sorumlu)
+                f_obj2._kunye = metin[:300]
+                ekle(f_obj2)
 
         # 3. Bildiriler
         for kat_key, ulusl in [("ulusl_bildiri",True),("ulusal_bildiri",False)]:
@@ -322,8 +326,10 @@ try:
                 else:
                     kod = "3.7" if "özet" in metin else                           "3.8" if "poster" in metin else "3.6"
                 si, toplam, sorumlu = _yazar_sirasi_bul(metin, isim)
-                ekle(t.Faaliyet(kod=kod, adet=1,
-                                toplam_yazar=toplam, yazar_sirasi=si))
+                f_obj3 = t.Faaliyet(kod=kod, adet=1,
+                                toplam_yazar=toplam, yazar_sirasi=si)
+                f_obj3._kunye = metin[:300]
+                ekle(f_obj3)
 
         # 5. Atıf (Scholar)
         atif   = int(sch.get("atif",0)    or 0)
@@ -349,7 +355,9 @@ try:
                         kod, pd = "11.2", "tescilli"
                     if "başvuru" in m_low: pd = "basvuru"
                     elif "araştırma" in m_low: pd = "arastirma_raporu"
-                    ekle(t.Faaliyet(kod=kod, adet=1, patent_durum=pd))
+                    f_obj4 = t.Faaliyet(kod=kod, adet=1, patent_durum=pd)
+                    f_obj4._kunye = metin[:300]
+                    ekle(f_obj4)
 
         # 12. Proje
         blok = veri.get("proje")
@@ -365,14 +373,18 @@ try:
                     kod = "12.11" if yurt else "12.12"
                 else:
                     kod = "12.13" if yurt else "12.14"
-                ekle(t.Faaliyet(kod=kod, adet=1))
+                f_obj5 = t.Faaliyet(kod=kod, adet=1)
+                f_obj5._kunye = m[:300]
+                ekle(f_obj5)
 
         # 17. Tez danışmanlığı
         for gorev in (veri.get("_akademik_gorev") or []):
             rol = gorev.get("unvan","").lower()
             if "tez" in rol or "danışman" in rol:
                 kod = "17.1" if "doktora" in rol else "17.2"
-                ekle(t.Faaliyet(kod=kod, adet=1))
+                f_obj5 = t.Faaliyet(kod=kod, adet=1)
+                f_obj5._kunye = m[:300]
+                ekle(f_obj5)
 
         return faaliyetler
 
@@ -764,10 +776,13 @@ def _faaliyet_satirlari(kadro_su: str) -> list[dict]:
             "arastirma_raporu": "ArRapor",
             "basvuru": "Bas.",
         }.get(f.patent_durum or "", "")
+        # Künye: Faaliyet nesnesine metin ekliyoruz (AVES'ten gelen)
+        kunye = getattr(f, "_kunye", "") or ""
         rows.append({
             "#":        i + 1,
             "Kod":      f.kod,
             "Faaliyet": bilgi_f.get("ad", "")[:55],
+            "Künye":    kunye[:120] if kunye else "—",
             "Adet":     f.adet,
             "Top.Yz.":  f.toplam_yazar if grup in {1, 2, 3} else "-",
             "Sira":     ("Sor/Sny" if f.sorumlu_veya_senyör else str(f.yazar_sirasi))
@@ -1301,20 +1316,102 @@ with tab2:
             use_container_width=True,
             height=min(420, 50 + 36 * len(rows)),
         )
-        del1, del2 = st.columns([2, 2])
-        with del1:
-            sil_no = st.number_input("Silinecek # numarası", min_value=1,
-                                     max_value=len(flist), step=1,
-                                     key="v_sil_idx")
-            if st.button("🗑  Seçiliyi Sil"):
-                st.session_state.faaliyetler.pop(int(sil_no) - 1)
+        sel_no = st.number_input(
+            "İşlem yapılacak # numarası",
+            min_value=1, max_value=len(flist), step=1, key="v_sel_idx")
+        idx_sel = int(sel_no) - 1
+        f_sel   = st.session_state.faaliyetler[idx_sel]
+
+        act1, act2, act3, act4 = st.columns([1,1,1,1])
+
+        with act1:
+            if st.button("✏️  Düzenle", use_container_width=True):
+                st.session_state["_duzenle_idx"] = idx_sel
+                st.session_state["_duzenle_ac"]  = True
+
+        with act2:
+            if st.button("🗑  Sil", use_container_width=True):
+                st.session_state.faaliyetler.pop(idx_sel)
                 st.rerun()
-        with del2:
-            st.write("")
-            st.write("")
-            if st.button("🗑  Tümünü Temizle"):
+
+        with act3:
+            if st.button("🗑  Tümünü Temizle", use_container_width=True):
                 st.session_state.faaliyetler = []
                 st.rerun()
+
+        with act4:
+            st.write("")
+
+        # ── Düzenleme formu ────────────────────────────────────────────────
+        if st.session_state.get("_duzenle_ac"):
+            didx = st.session_state.get("_duzenle_idx", 0)
+            if didx < len(st.session_state.faaliyetler):
+                f_d = st.session_state.faaliyetler[didx]
+                bilgi_d = t.EK2_PUANLAR.get(f_d.kod, {})
+                st.divider()
+                st.markdown(f"**✏️ #{didx+1} numaralı faaliyet düzenleniyor**")
+
+                # Künye göster (varsa)
+                kunye_d = getattr(f_d, "_kunye", "")
+                if kunye_d:
+                    st.caption(f"📄 Künye: {kunye_d}")
+
+                dc1, dc2, dc3 = st.columns([2,1,1])
+                with dc1:
+                    yeni_kod = st.selectbox(
+                        "EK-2 Kodu",
+                        options=list(t.EK2_PUANLAR.keys()),
+                        index=list(t.EK2_PUANLAR.keys()).index(f_d.kod)
+                              if f_d.kod in t.EK2_PUANLAR else 0,
+                        format_func=lambda k: f"{k} – {t.EK2_PUANLAR[k]['ad'][:50]}",
+                        key="v_d_kod")
+                with dc2:
+                    yeni_adet = st.number_input("Adet", min_value=1,
+                        value=f_d.adet, key="v_d_adet")
+                with dc3:
+                    yeni_q = st.selectbox("Q Değeri",
+                        options=["", "Q1","Q2","Q3","Q4"],
+                        index=["","Q1","Q2","Q3","Q4"].index(f_d.q_degeri or ""),
+                        key="v_d_q")
+
+                dd1, dd2, dd3 = st.columns([1,1,2])
+                with dd1:
+                    yeni_top_yz = st.number_input("Toplam Yazar",
+                        min_value=1, value=f_d.toplam_yazar, key="v_d_tyz")
+                with dd2:
+                    yeni_sira = st.number_input("Yazar Sırası",
+                        min_value=1, value=f_d.yazar_sirasi, key="v_d_sira")
+                with dd3:
+                    yeni_sorumlu = st.checkbox("Sorumlu/Senyör Yazar",
+                        value=f_d.sorumlu_veya_senyör, key="v_d_sor")
+
+                # Patent durumu
+                yeni_pd = f_d.patent_durum
+                if yeni_kod in ("11.1","11.7"):
+                    yeni_pd = st.radio("Patent Durumu",
+                        options=["tescilli","arastirma_raporu","basvuru"],
+                        index=["tescilli","arastirma_raporu","basvuru"].index(
+                            f_d.patent_durum or "tescilli"),
+                        horizontal=True, key="v_d_pd")
+
+                db1, db2 = st.columns(2)
+                with db1:
+                    if st.button("💾 Kaydet", type="primary",
+                                 use_container_width=True, key="v_d_kaydet"):
+                        f_d.kod               = yeni_kod
+                        f_d.adet              = int(yeni_adet)
+                        f_d.toplam_yazar      = int(yeni_top_yz)
+                        f_d.yazar_sirasi      = int(yeni_sira)
+                        f_d.sorumlu_veya_senyör = yeni_sorumlu
+                        f_d.q_degeri          = yeni_q or None
+                        f_d.patent_durum      = yeni_pd
+                        st.session_state["_duzenle_ac"] = False
+                        st.rerun()
+                with db2:
+                    if st.button("❌ İptal", use_container_width=True,
+                                 key="v_d_iptal"):
+                        st.session_state["_duzenle_ac"] = False
+                        st.rerun()
     else:
         st.info("Henüz faaliyet eklenmedi. Sol taraftan kategori seçip faaliyet ekleyin.")
 
