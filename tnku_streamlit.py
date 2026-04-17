@@ -326,15 +326,33 @@ try:
 
         return veri
 
+    def _yayin_yili_bul(metin: str) -> int:
+        """Künye metninden yayın yılını bul (4 haneli sayı)."""
+        import re as _re_yil
+        # Son 4 haneli yıl sayısını al (2000-2030 arası)
+        yillar = _re_yil.findall(r'\b(20\d{2}|19\d{2})\b', metin)
+        if yillar:
+            return int(yillar[-1])  # Son yılı al
+        return 0
+
     def aves_faaliyete_donustur(cv_url: str, isim: str) -> list[t.Faaliyet]:
         """AVES verisini t.Faaliyet listesine dönüştür.
         Önce yerel cache'e bakar, yoksa AVES'ten canlı çeker."""
+        import streamlit as _st2
+        # Profesör başvurusuysa doçentlik yılını al
+        kadro_v    = _st2.session_state.get("v_kadro", "")
+        docent_yil = int(_st2.session_state.get("v_docent_yil", 0) or 0)
+        # Sadece profesör başvurusunda docent_sonrasi hesapla
+        def _docent_sonrasi_mi(metin_):
+            if kadro_v != "profesor" or docent_yil == 0:
+                return False
+            yayin_yil = _yayin_yili_bul(metin_)
+            return yayin_yil > docent_yil if yayin_yil > 0 else False
+
         veri = _aves_yukle_cv(cv_url)
         sch  = _aves_scholar_yukle(cv_url)
-        # Yerel veri yoksa canlı çek - hata mesajını saklamadan
         if not veri:
             veri = _aves_canli_cek(cv_url)
-        # _aves_canli_cek_son_hata global'inden hata bilgisi alınabilir
 
         faaliyetler = []
         ekle = faaliyetler.append
@@ -358,6 +376,7 @@ try:
                     kod=kod, adet=1,
                     toplam_yazar=toplam, yazar_sirasi=si,
                     sorumlu_veya_senyör=sorumlu, q_degeri=q,
+                    docent_sonrasi=_docent_sonrasi_mi(metin),
                 )
                 f_obj._kunye = metin[:300]
                 ekle(f_obj)
@@ -375,7 +394,8 @@ try:
                 si, toplam, sorumlu = _yazar_sirasi_bul(metin, isim)
                 f_obj2 = t.Faaliyet(kod=kod, adet=1,
                                 toplam_yazar=toplam, yazar_sirasi=si,
-                                sorumlu_veya_senyör=sorumlu)
+                                sorumlu_veya_senyör=sorumlu,
+                                docent_sonrasi=_docent_sonrasi_mi(metin))
                 f_obj2._kunye = metin[:300]
                 ekle(f_obj2)
 
@@ -391,7 +411,8 @@ try:
                     kod = "3.7" if "özet" in metin else                           "3.8" if "poster" in metin else "3.6"
                 si, toplam, sorumlu = _yazar_sirasi_bul(metin, isim)
                 f_obj3 = t.Faaliyet(kod=kod, adet=1,
-                                toplam_yazar=toplam, yazar_sirasi=si)
+                                toplam_yazar=toplam, yazar_sirasi=si,
+                                docent_sonrasi=_docent_sonrasi_mi(metin))
                 f_obj3._kunye = metin[:300]
                 ekle(f_obj3)
 
@@ -419,7 +440,8 @@ try:
                         kod, pd = "11.2", "tescilli"
                     if "başvuru" in m_low: pd = "basvuru"
                     elif "araştırma" in m_low: pd = "arastirma_raporu"
-                    f_obj4 = t.Faaliyet(kod=kod, adet=1, patent_durum=pd)
+                    f_obj4 = t.Faaliyet(kod=kod, adet=1, patent_durum=pd,
+                                        docent_sonrasi=_docent_sonrasi_mi(metin))
                     f_obj4._kunye = metin[:300]
                     ekle(f_obj4)
 
@@ -437,7 +459,8 @@ try:
                     kod = "12.11" if yurt else "12.12"
                 else:
                     kod = "12.13" if yurt else "12.14"
-                f_obj5 = t.Faaliyet(kod=kod, adet=1)
+                f_obj5 = t.Faaliyet(kod=kod, adet=1,
+                                    docent_sonrasi=_docent_sonrasi_mi(m))
                 f_obj5._kunye = m[:300]
                 ekle(f_obj5)
 
@@ -446,7 +469,8 @@ try:
             rol = gorev.get("unvan","").lower()
             if "tez" in rol or "danışman" in rol:
                 kod = "17.1" if "doktora" in rol else "17.2"
-                f_obj5 = t.Faaliyet(kod=kod, adet=1)
+                f_obj5 = t.Faaliyet(kod=kod, adet=1,
+                                    docent_sonrasi=_docent_sonrasi_mi(m))
                 f_obj5._kunye = m[:300]
                 ekle(f_obj5)
 
@@ -1231,6 +1255,15 @@ with tab1:
             st.selectbox("Yeniden Atama Süresi", key="v_sure",
                          options=[3, 2, 1],
                          format_func=lambda x: f"{x} Yıl")
+        if st.session_state.get("v_kadro") == "profesor":
+            st.number_input(
+                "Doçentlik Yılı",
+                min_value=1970, max_value=2030,
+                value=st.session_state.get("v_docent_yil", 2020),
+                step=1, key="v_docent_yil",
+                help="Doçentlik unvanını aldığınız yıl. Yayın yılı bu yıldan "
+                     "sonraysa 'Doçentlik Sonrası' otomatik işaretlenir."
+            )
 
     st.divider()
     st.markdown('<div class="card-title">GENEL KOŞULLAR</div>',
@@ -1510,6 +1543,18 @@ with tab2:
                         "Sorumlu/Senyör Yazar",
                         value=f_d.sorumlu_veya_senyör, key=f"sor_{didx}")
 
+                # Doçentlik Sonrası - sadece profesör başvurusunda
+                _kadro_sec = st.session_state.get("v_kadro","")
+                yeni_docsn = f_d.docent_sonrasi
+                if _kadro_sec == "profesor":
+                    _doc_yil = int(st.session_state.get("v_docent_yil", 0) or 0)
+                    _yayin_y = _yayin_yili_bul(getattr(f_d, "_kunye", "") or "")
+                    _auto    = (_yayin_y > _doc_yil) if (_doc_yil > 0 and _yayin_y > 0) else f_d.docent_sonrasi
+                    yeni_docsn = st.checkbox(
+                        f"Doçentlik Sonrası Faaliyet"
+                        + (f" (yayın yılı: {_yayin_y})" if _yayin_y else ""),
+                        value=_auto, key=f"dcsn_{didx}")
+
                 yeni_pd = f_d.patent_durum
                 if yeni_kod in ("11.1", "11.7"):
                     yeni_pd = st.radio(
@@ -1531,6 +1576,7 @@ with tab2:
                         f_d.q_degeri          = yeni_q or None
                         f_d.patent_durum      = yeni_pd
                         f_d._kunye            = yeni_kunye.strip()
+                        f_d.docent_sonrasi    = yeni_docsn
                         st.rerun()
                 with btn2:
                     if st.button("🗑 Sil", key=f"sil_{didx}",
