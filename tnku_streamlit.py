@@ -105,13 +105,17 @@ try:
         return "1.7"
 
 
+    _aves_son_hata = [""]  # Hata mesajını dışarı taşımak için
+
     def _aves_canli_cek(cv_url: str) -> dict:
         """AVES CV sayfasından canlı veri çek. Session cookie zorunlu."""
+        _aves_son_hata[0] = ""
         try:
             import requests as _req
             from bs4 import BeautifulSoup as _BS
             import copy as _copy
-        except ImportError:
+        except ImportError as _ie:
+            _aves_son_hata[0] = f"Paket eksik: {_ie}"
             return {}
 
         HDR = {
@@ -132,8 +136,12 @@ try:
         sess = _req.Session()
         sess.headers.update(HDR)
         try:
-            sess.get(base + "/", timeout=10)
-        except Exception:
+            r0 = sess.get(base + "/", timeout=12)
+            if r0.status_code not in (200, 301, 302):
+                _aves_son_hata[0] = f"Ana sayfa {r0.status_code}: {base}/"
+                return {}
+        except Exception as _e0:
+            _aves_son_hata[0] = f"Bağlantı hatası: {_e0}"
             return {}
 
         # Kategori başlık → anahtar eşleşmesi
@@ -259,9 +267,10 @@ try:
         Önce yerel cache'e bakar, yoksa AVES'ten canlı çeker."""
         veri = _aves_yukle_cv(cv_url)
         sch  = _aves_scholar_yukle(cv_url)
-        # Yerel veri yoksa canlı çek
+        # Yerel veri yoksa canlı çek - hata mesajını saklamadan
         if not veri:
             veri = _aves_canli_cek(cv_url)
+        # _aves_canli_cek_son_hata global'inden hata bilgisi alınabilir
 
         faaliyetler = []
         ekle = faaliyetler.append
@@ -1035,6 +1044,22 @@ with tab1:
                 placeholder="Örn: Ahmet SAYGILI",
             )
 
+            # Debug: bağlantı testi
+            if st.button("🔍 Bağlantı Test Et", use_container_width=False):
+                url_t = (aves_url_v or "").strip()
+                if url_t:
+                    base_t = url_t.rstrip("/")
+                    if not base_t.startswith("http"):
+                        base_t = "http://" + base_t
+                    try:
+                        import requests as _rtest
+                        r_t = _rtest.get(base_t + "/", timeout=8)
+                        st.success(f"✅ Bağlantı başarılı! Status: {r_t.status_code}, Cookie: {bool(r_t.cookies)}")
+                    except Exception as _et:
+                        st.error(f"❌ Bağlantı hatası: {_et}")
+                else:
+                    st.warning("URL boş")
+
             col_aves1, col_aves2 = st.columns(2)
             with col_aves1:
                 if st.button("⚡ Yükle ve Ekle", type="primary",
@@ -1046,16 +1071,24 @@ with tab1:
                         st.error("CV URL boş olamaz.")
                     else:
                         with st.spinner("AVES verisi yükleniyor..."):
-                            yeni = aves_faaliyete_donustur(url, isim)
+                            try:
+                                yeni = aves_faaliyete_donustur(url, isim)
+                                if not AVES_OK:
+                                    st.error("requests veya bs4 eksik: pip install requests beautifulsoup4")
+                            except Exception as _ex:
+                                st.error(f"Hata: {_ex}")
+                                if _aves_son_hata[0]:
+                                    st.error(f"Detay: {_aves_son_hata[0]}")
+                                yeni = []
                         if yeni:
                             st.session_state.faaliyetler.extend(yeni)
                             st.success(f"✅ {len(yeni)} faaliyet eklendi!")
                             st.rerun()
                         else:
                             st.warning(
-                                "AVES sayfasından veri çekilemedi. "
-                                "URL'nin doğru olduğunu ve AVES profilinin "
-                                "herkese açık olduğunu kontrol edin."
+                                f"AVES'ten {len(yeni)} faaliyet çekildi ancak "
+                                "yayın/proje verisi bulunamadı. "
+                                "URL formatı: asaygili.cv.nku.edu.tr"
                             )
             with col_aves2:
                 if st.button("🗑 Tüm Otomatik Verileri Temizle",
