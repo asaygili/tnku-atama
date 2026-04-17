@@ -81,24 +81,21 @@ try:
         return None
 
     def _yazar_sirasi_bul(metin: str, isim: str):
-        """
-        Künye metninden yazar listesini ve aranan kişinin sırasını bul.
-        Büyük harf, küçük harf ve karışık harf formatlarını destekler.
-        """
+        """Künye metninden yazar listesini ve aranan kişinin sırasını bul."""
         if not isim or not metin:
             return 1, 1, False
 
         BAG = {'a','an','the','in','of','and','or','for','with','by',
                've','ile','bir','bu','da','de','to','on','at','is','as',
-               'using','based','via','from','through'}
+               'using','based','via','from','through','detection','classification',
+               'approach','method','analysis','deep','learning','neural','network'}
 
-        def _normalize(m):
-            """Metin tamamen küçük harfse title case'e çevir."""
+        def _normalize_if_needed(m):
+            """Sadece hiç büyük harf yoksa title case'e çevir."""
             harfler = [c for c in m if c.isalpha()]
             if not harfler:
                 return m
-            buyuk_oran = sum(1 for c in harfler if c.isupper()) / len(harfler)
-            if buyuk_oran < 0.1:  # %10'dan az büyük harf → tamamen küçük
+            if sum(1 for c in harfler if c.isupper()) == 0:
                 parcalar = m.split(',')
                 yeni = []
                 for p in parcalar:
@@ -112,24 +109,24 @@ try:
             p = parca.strip()
             if not p or len(p) < 2:
                 return False
-            if p[0].isdigit() or p[0] in '.([':
+            if p[0].isdigit():
                 return False
-            if _re_aves.match(r'^(vol|pp|no|doi|isbn|issn)', p.lower()):
+            if ':' in p:
                 return False
             kelimeler = p.split()
-            if len(kelimeler) > 5:
+            if len(kelimeler) > 4:
+                return False
+            if any(_re_aves.search(r'\d', k) for k in kelimeler):
                 return False
             if any(k.lower() in BAG for k in kelimeler):
                 return False
-            # Küçük harfle başlayan kelime varsa başlık
-            kucuk_baslayan = [k for k in kelimeler if len(k) > 1 and k[0].islower()]
-            if kucuk_baslayan:
+            if any(k[0].islower() for k in kelimeler if k):
                 return False
-            buyuk = sum(1 for k in kelimeler
-                        if len(k) > 1 and (k == k.upper() or k[0].isupper()))
-            return buyuk >= 1
+            tam_buyuk = [k for k in kelimeler if k == k.upper() and len(k) > 1]
+            title_case = all(k[0].isupper() for k in kelimeler if k)
+            return len(tam_buyuk) >= 1 or title_case
 
-        metin_n = _normalize(metin)
+        metin_n = _normalize_if_needed(metin)
         parcalar = [p.strip() for p in metin_n.split(',')]
         yazarlar = []
         for p in parcalar:
