@@ -42,9 +42,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Google Analytics
-# ─────────────────────────────────────────────────────────────────────────────
 components.html("""
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-QJFQV27KN5"></script>
 <script>
