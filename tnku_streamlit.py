@@ -43,14 +43,35 @@ st.set_page_config(
 )
 
 components.html("""
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-QJFQV27KN5"></script>
 <script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
+(function() {
+  var GA_ID = 'G-QJFQV27KN5';
+  var win = window;
+  try { if (window.top && window.top.document) win = window.top; } catch(e) {}
+
+  win.dataLayer = win.dataLayer || [];
+  function gtag(){ win.dataLayer.push(arguments); }
   gtag('js', new Date());
-  gtag('config', 'G-QJFQV27KN5', {
-    'page_location': 'https://tnku-atama.streamlit.app'
+  gtag('config', GA_ID, {
+    'page_location': 'https://tnku-atama.streamlit.app',
+    'page_title': 'TNKU Atama Puanlama'
   });
+
+  var s = document.createElement('script');
+  s.async = true;
+  s.src = 'https://www.googletagmanager.com/gtag/js?id=' + GA_ID;
+  s.onload = function() {
+    if (win !== window) {
+      win.dataLayer = win.dataLayer || [];
+      function gtagTop(){ win.dataLayer.push(arguments); }
+      gtagTop('js', new Date());
+      gtagTop('config', GA_ID, {
+        'page_location': 'https://tnku-atama.streamlit.app'
+      });
+    }
+  };
+  document.head.appendChild(s);
+})();
 </script>
 """, height=1)
 
