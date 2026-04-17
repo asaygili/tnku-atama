@@ -1360,7 +1360,11 @@ with tab2:
             value=min(sel_no_val, len(flist)),
             key="v_sel_idx")
         idx_sel = int(sel_no) - 1
-        f_sel   = st.session_state.faaliyetler[idx_sel]
+        # sel_no değiştiğinde _duzenle_idx senkronize et
+        if st.session_state.get("_duzenle_ac") and            st.session_state.get("_duzenle_idx") != idx_sel:
+            st.session_state["_duzenle_idx"] = idx_sel
+            st.rerun()
+        f_sel = st.session_state.faaliyetler[idx_sel]
 
         act1, act2, act3, act4 = st.columns([1,1,1,1])
 
@@ -1390,7 +1394,11 @@ with tab2:
                 f_d = st.session_state.faaliyetler[didx]
                 bilgi_d = t.EK2_PUANLAR.get(f_d.kod, {})
                 st.divider()
-                st.markdown(f"**✏️ #{didx+1} numaralı faaliyet düzenleniyor**")
+                bilgi_d_ad = bilgi_d.get("ad","")
+                st.markdown(
+                    f"**✏️ #{didx+1} numaralı faaliyet düzenleniyor**  "
+                    f"<span style='color:#64748b;font-size:0.85em'>{f_d.kod} – {bilgi_d_ad[:60]}</span>",
+                    unsafe_allow_html=True)
 
                 # Künye düzenleme
                 kunye_d = getattr(f_d, "_kunye", "") or ""
@@ -1399,7 +1407,7 @@ with tab2:
                     value=kunye_d,
                     height=68,
                     placeholder="Yazar(lar), Başlık, Dergi/Yayınevi, Yıl...",
-                    key="v_d_kunye"
+                    key=f"v_d_kunye_{didx}"
                 )
 
                 dc1, dc2, dc3 = st.columns([2,1,1])
@@ -1410,26 +1418,26 @@ with tab2:
                         index=list(t.EK2_PUANLAR.keys()).index(f_d.kod)
                               if f_d.kod in t.EK2_PUANLAR else 0,
                         format_func=lambda k: f"{k} – {t.EK2_PUANLAR[k]['ad'][:50]}",
-                        key="v_d_kod")
+                        key=f"v_d_kod_{didx}")
                 with dc2:
                     yeni_adet = st.number_input("Adet", min_value=1,
-                        value=f_d.adet, key="v_d_adet")
+                        value=f_d.adet, key=f"v_d_adet_{didx}")
                 with dc3:
                     yeni_q = st.selectbox("Q Değeri",
                         options=["", "Q1","Q2","Q3","Q4"],
                         index=["","Q1","Q2","Q3","Q4"].index(f_d.q_degeri or ""),
-                        key="v_d_q")
+                        key=f"v_d_q_{didx}")
 
                 dd1, dd2, dd3 = st.columns([1,1,2])
                 with dd1:
                     yeni_top_yz = st.number_input("Toplam Yazar",
-                        min_value=1, value=f_d.toplam_yazar, key="v_d_tyz")
+                        min_value=1, value=f_d.toplam_yazar, key=f"v_d_tyz_{didx}")
                 with dd2:
                     yeni_sira = st.number_input("Yazar Sırası",
-                        min_value=1, value=f_d.yazar_sirasi, key="v_d_sira")
+                        min_value=1, value=f_d.yazar_sirasi, key=f"v_d_sira_{didx}")
                 with dd3:
                     yeni_sorumlu = st.checkbox("Sorumlu/Senyör Yazar",
-                        value=f_d.sorumlu_veya_senyör, key="v_d_sor")
+                        value=f_d.sorumlu_veya_senyör, key=f"v_d_sor_{didx}")
 
                 # Patent durumu
                 yeni_pd = f_d.patent_durum
@@ -1438,12 +1446,12 @@ with tab2:
                         options=["tescilli","arastirma_raporu","basvuru"],
                         index=["tescilli","arastirma_raporu","basvuru"].index(
                             f_d.patent_durum or "tescilli"),
-                        horizontal=True, key="v_d_pd")
+                        horizontal=True, key=f"v_d_pd_{didx}")
 
                 db1, db2 = st.columns(2)
                 with db1:
                     if st.button("💾 Kaydet", type="primary",
-                                 use_container_width=True, key="v_d_kaydet"):
+                                 use_container_width=True, key=f"v_d_kaydet_{didx}"):
                         f_d.kod               = yeni_kod
                         f_d.adet              = int(yeni_adet)
                         f_d.toplam_yazar      = int(yeni_top_yz)
@@ -1457,7 +1465,7 @@ with tab2:
                         st.rerun()
                 with db2:
                     if st.button("❌ İptal", use_container_width=True,
-                                 key="v_d_iptal"):
+                                 key=f"v_d_iptal_{didx}"):
                         st.session_state["_duzenle_ac"] = False
                         st.rerun()
     else:
