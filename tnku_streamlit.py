@@ -171,6 +171,116 @@ try:
 
     _aves_son_hata = [""]  # Hata mesajını dışarı taşımak için
 
+
+    # ── Dergi Q Değeri Lookup ────────────────────────────────────────────────
+    _DERGI_Q = {
+        # Q1 - SCI/SCI-E
+        "nature": "Q1", "science": "Q1", "cell": "Q1",
+        "ieee transactions on pattern analysis and machine intelligence": "Q1",
+        "medical image analysis": "Q1", "pattern recognition": "Q1",
+        "neural networks": "Q1", "information fusion": "Q1",
+        "expert systems with applications": "Q1",
+        "knowledge-based systems": "Q1",
+        "computers in biology and medicine": "Q1",
+        "biomedical signal processing and control": "Q1",
+        "artificial intelligence in medicine": "Q1",
+        "journal of biomedical informatics": "Q1",
+        "applied soft computing": "Q1", "neurocomputing": "Q1",
+        "ieee transactions on neural networks and learning systems": "Q1",
+        "ieee transactions on image processing": "Q1",
+        "ieee transactions on medical imaging": "Q1",
+        "ieee journal of biomedical and health informatics": "Q1",
+        "computers in human behavior": "Q1",
+        "information sciences": "Q1", "future generation computer systems": "Q1",
+        "pattern recognition letters": "Q1",
+        "computer methods and programs in biomedicine": "Q1",
+        "international journal of neural systems": "Q1",
+        "ieee transactions on cybernetics": "Q1",
+        "ieee transactions on systems man and cybernetics": "Q1",
+        "journal of king saud university - computer and information sciences": "Q1",
+        # Q2 - SCI
+        "ieee access": "Q2",
+        "peerj computer science": "Q2",
+        "diagnostics": "Q2", "sensors": "Q2", "electronics": "Q2",
+        "symmetry": "Q2", "mathematics": "Q2", "applied sciences": "Q2",
+        "healthcare": "Q2", "bioengineering": "Q2",
+        "signal image and video processing": "Q2",
+        "international journal of imaging systems and technology": "Q2",
+        "computational and mathematical methods in medicine": "Q2",
+        "mathematical biosciences and engineering": "Q2",
+        "journal of healthcare engineering": "Q2",
+        "multimedia tools and applications": "Q2",
+        "signal processing: image communication": "Q2",
+        "applied intelligence": "Q2",
+        "neural computing and applications": "Q2",
+        "soft computing": "Q2",
+        "international journal of machine learning and cybernetics": "Q2",
+        "journal of ambient intelligence and humanized computing": "Q2",
+        "turkish journal of electrical engineering and computer sciences": "Q2",
+        # Q3 - ESCI/Scopus
+        "journal of imaging": "Q3",
+        "traitement du signal": "Q3",
+        "international journal of advanced computer science and applications": "Q3",
+        "journal of experimental and theoretical analyses": "Q3",
+        "concurrency and computation practice and experience": "Q3",
+        "automatika": "Q3",
+    }
+
+    def _dergi_q_bul(dergi_adi):
+        """Dergi adından Q değeri bul (lookup + kısmi eşleşme)."""
+        if not dergi_adi:
+            return None
+        d = dergi_adi.lower().strip()
+        # Tam eşleşme
+        if d in _DERGI_Q:
+            return _DERGI_Q[d]
+        # Kısmi eşleşme
+        for bilinen, q in _DERGI_Q.items():
+            if bilinen in d or d in bilinen:
+                return q
+        return None
+
+    def _kunye_dergi_cikart(kunye):
+        """Künye metninden dergi adını çıkar."""
+        if not kunye:
+            return None
+        parcalar = [p.strip() for p in kunye.split(',')]
+        bitis_idx = len(parcalar)
+        for i, p in enumerate(parcalar):
+            p_low = p.lower().strip()
+            if _re_aves.match(
+                r'^(vol|volume|cilt|sayı|no|pp|pages?|\d{4}$'
+                r'|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec'
+                r'|oca|şub|nis|haz|tem|ağu|eyl|eki|kas|ara)', p_low):
+                bitis_idx = i
+                break
+        BAG = {'a','an','the','in','of','and','or','for','with','by','ve','ile'}
+        def _yazar_mi2(p):
+            kel = p.split()
+            if len(kel) > 4: return False
+            if any(k.lower() in BAG for k in kel): return False
+            if ':' in p: return False
+            if any(_re_aves.search(r'[0-9]', k) for k in kel): return False
+            return all(k[0].isupper() for k in kel if k)
+        yb = 0
+        for i, p in enumerate(parcalar[:bitis_idx]):
+            if _yazar_mi2(p): yb = i + 1
+            else: break
+        aralik = parcalar[yb:bitis_idx]
+        if not aralik:
+            return None
+        dergi = aralik[-1].strip()
+        if len(dergi) < 5 and len(aralik) >= 2:
+            dergi = f"{aralik[-2]}, {aralik[-1]}"
+        return dergi if len(dergi) >= 3 else None
+
+    def _kunye_q_bul(kunye):
+        """Künyeden dergi adını çıkar ve Q değerini bul."""
+        dergi = _kunye_dergi_cikart(kunye)
+        if dergi:
+            return _dergi_q_bul(dergi)
+        return None
+
     def _aves_canli_cek(cv_url: str) -> dict:
         """AVES CV sayfasından canlı veri çek. Session cookie zorunlu."""
         _aves_son_hata[0] = ""
@@ -364,7 +474,7 @@ try:
             for o in blok.get("ogeler", []):
                 metin  = o.get("metin", "")
                 endeks = o.get("endeks", []) or []
-                q      = o.get("q") or _aves_q_bul(metin)
+                q      = o.get("q") or _kunye_q_bul(metin) or _aves_q_bul(metin)
                 si, toplam, sorumlu = _yazar_sirasi_bul(metin, isim)
                 if kat_key == "ulusal_makale":
                     eks_str = " ".join(endeks).upper()
