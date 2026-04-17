@@ -104,12 +104,164 @@ try:
         if any(x in eks for x in ("EBSCO","DOAJ","DRJI")): return "1.5"
         return "1.7"
 
+
+    def _aves_canli_cek(cv_url: str) -> dict:
+        """AVES CV sayfasından canlı veri çek. Session cookie zorunlu."""
+        try:
+            import requests as _req
+            from bs4 import BeautifulSoup as _BS
+            import copy as _copy
+        except ImportError:
+            return {}
+
+        HDR = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                          "AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,*/*;q=0.9",
+            "Accept-Language": "tr-TR,tr;q=0.9",
+        }
+
+        base = cv_url.rstrip("/").rstrip("\\")
+        if base.startswith("//"):
+            base = "http:" + base
+        if not base.startswith("http"):
+            # "asaygili.cv.nku.edu.tr" formatı
+            base = "http://" + base
+
+        # Session oluştur - önce ana sayfayı ziyaret et (cookie al)
+        sess = _req.Session()
+        sess.headers.update(HDR)
+        try:
+            sess.get(base + "/", timeout=10)
+        except Exception:
+            return {}
+
+        # Kategori başlık → anahtar eşleşmesi
+        KAT_MAP = [
+            ("Uluslararası Hakemli Dergi",   "ulusl_makale"),
+            ("Ulusal Hakemli Dergi",          "ulusal_makale"),
+            ("Uluslararası Kitap",            "kitap_ulusl"),
+            ("Ulusal Kitap",                  "kitap_ulusal"),
+            ("Kitap Bölümü",                  "kitap_bolum"),
+            ("Uluslararası Bilimsel Toplantı","ulusl_bildiri"),
+            ("Ulusal Bilimsel Toplantı",      "ulusal_bildiri"),
+        ]
+        def _kategori_key(baslik):
+            for anahtar, key in KAT_MAP:
+                if anahtar.lower() in baslik.lower():
+                    return key
+            return baslik.lower().replace(" ","_")[:20]
+
+        def _parse_yayinlar_html(html):
+            soup = _BS(html, "html.parser")
+            sonuc = {}
+            for panel in soup.find_all("div", class_="panel"):
+                heading = panel.find("div", class_="panel-heading")
+                if not heading:
+                    continue
+                baslik = heading.get_text(strip=True)
+                key    = _kategori_key(baslik)
+                ogeler = []
+                for tr in panel.find_all("tr"):
+                    tds = tr.find_all("td")
+                    if len(tds) < 2:
+                        continue
+                    td = tds[1]
+                    endeks = [s.get_text(strip=True)
+                              for s in td.find_all("span", class_="label-info")]
+                    tip    = next((s.get_text(strip=True)
+                                   for s in td.find_all("span", class_="label-warning")), "")
+                    td_c   = _copy.copy(td)
+                    for tag in td_c.find_all(["span","a"]):
+                        tag.extract()
+                    metin  = td_c.get_text(separator=" ", strip=True)
+                    if metin and len(metin) > 5:
+                        ogeler.append({"metin": metin, "endeks": endeks, "tip": tip})
+                if ogeler:
+                    sonuc[key] = {"baslik": baslik, "sayi": len(ogeler), "ogeler": ogeler}
+            return sonuc
+
+        def _parse_genel_html(html):
+            soup = _BS(html, "html.parser")
+            ogeler = []
+            for tr in soup.find_all("tr"):
+                tds = tr.find_all("td")
+                if len(tds) >= 2:
+                    metin = tds[1].get_text(separator=" ", strip=True)
+                    if metin and len(metin) > 5:
+                        ogeler.append({"metin": metin[:400]})
+            return {"sayi": len(ogeler), "ogeler": ogeler}
+
+        def _parse_patent_odul_html(html):
+            soup = _BS(html, "html.parser")
+            ogeler = []
+            mevcut_tip = "patent"
+            ODUL_KW = {"ödül","award","prize","madalya","plaket","teşvik","birincilik"}
+            PATENT_KW = {"patent","faydalı model","ep ","us ","wo ","pct","wipo"}
+            # Bölüm başlıklarını bul
+            for el in soup.find_all(True):
+                if el.name in ("h2","h3","h4") or (
+                        el.get("class") and "panel-heading" in " ".join(el.get("class",""))):
+                    txt = el.get_text(strip=True).lower()
+                    if "ödül" in txt: mevcut_tip = "odul"
+                    elif "patent" in txt: mevcut_tip = "patent"
+                elif el.name == "tr":
+                    tds = el.find_all("td")
+                    if len(tds) >= 2:
+                        metin = tds[1].get_text(separator=" ", strip=True)
+                        if not metin or len(metin) < 5: continue
+                        m_low = metin.lower()
+                        if any(k in m_low for k in ODUL_KW): tip = "odul"
+                        elif any(k in m_low for k in PATENT_KW): tip = "patent"
+                        else: tip = mevcut_tip
+                        ogeler.append({"metin": metin[:400], "tip": tip})
+            return {"sayi": len(ogeler), "ogeler": ogeler}
+
+        veri = {}
+        referer = base + "/"
+
+        # Yayınlar (tüm kategoriler tek sayfada)
+        try:
+            r = sess.get(base + "/cv/yayinlar/", timeout=12,
+                         headers={"Referer": referer})
+            if r.status_code == 200:
+                parsed = _parse_yayinlar_html(r.text)
+                veri.update(parsed)
+        except Exception:
+            pass
+
+        # Projeler
+        try:
+            r = sess.get(base + "/cv/projeler/", timeout=10,
+                         headers={"Referer": referer})
+            if r.status_code == 200:
+                p = _parse_genel_html(r.text)
+                if p["sayi"] > 0:
+                    veri["proje"] = p
+        except Exception:
+            pass
+
+        # Patent & Ödüller
+        try:
+            r = sess.get(base + "/cv/patentleroduller/", timeout=10,
+                         headers={"Referer": referer})
+            if r.status_code == 200:
+                p = _parse_patent_odul_html(r.text)
+                if p["sayi"] > 0:
+                    veri["patent"] = p
+        except Exception:
+            pass
+
+        return veri
+
     def aves_faaliyete_donustur(cv_url: str, isim: str) -> list[t.Faaliyet]:
-        """AVES verisini t.Faaliyet listesine dönüştür."""
-        veri  = _aves_yukle_cv(cv_url)
-        sch   = _aves_scholar_yukle(cv_url)
-        if not veri and not sch:
-            return []
+        """AVES verisini t.Faaliyet listesine dönüştür.
+        Önce yerel cache'e bakar, yoksa AVES'ten canlı çeker."""
+        veri = _aves_yukle_cv(cv_url)
+        sch  = _aves_scholar_yukle(cv_url)
+        # Yerel veri yoksa canlı çek
+        if not veri:
+            veri = _aves_canli_cek(cv_url)
 
         faaliyetler = []
         ekle = faaliyetler.append
@@ -869,13 +1021,13 @@ with tab1:
         # ── AVES Otomatik Yükle ──────────────────────────────────────────────
         with st.expander("🔗  AVES Verisinden Otomatik Yükle", expanded=False):
             st.caption(
-                "Rehber programında çekilen CV verilerini buraya otomatik yükleyin. "
-                "cv_url'yi AVES profilinden kopyalayın (örn: https://avesis.nku.edu.tr/kisi/...)."
+                "AVES CV adresinizi girin (örn: **asaygili.cv.nku.edu.tr**). "
+                "Yayınlar, projeler ve patentler otomatik olarak çekilir."
             )
             aves_url_v = st.text_input(
                 "AVES CV URL",
                 key="v_aves_url",
-                placeholder="https://avesis.nku.edu.tr/kisi/...",
+                placeholder="asaygili.cv.nku.edu.tr",
             )
             aves_isim_v = st.text_input(
                 "Ad Soyad (yazar sırası için)",
@@ -901,8 +1053,9 @@ with tab1:
                             st.rerun()
                         else:
                             st.warning(
-                                "Veri bulunamadı. CV verisi daha önce çekilmiş olmalı. "
-                                "Rehber programında 'CV Çek' ve 'Scholar' butonlarına basın."
+                                "AVES sayfasından veri çekilemedi. "
+                                "URL'nin doğru olduğunu ve AVES profilinin "
+                                "herkese açık olduğunu kontrol edin."
                             )
             with col_aves2:
                 if st.button("🗑 Tüm Otomatik Verileri Temizle",
