@@ -987,20 +987,50 @@ def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
     elems.append(Spacer(1, 10))
 
     elems.append(Paragraph("FAALIYET DETAYI", s_sec))
-    fdata = [["Kod", "Faaliyet", "Adet", "Puan", "Tur"]]
-    for d in pnlar["detaylar"]:
-        fdata.append([d["kod"], d["ad"][:70], str(d["adet"]),
-                      f"{d['puan']:.2f}",
-                      "PUAN-1" if d["puan1_mi"] else "PUAN-2"])
+
+    # Faaliyet listesinden künye haritası oluştur (kod → künye)
+    # aday.faaliyetler ile pnlar["detaylar"] aynı sırada
+    faaliyet_kunye = []
+    for f in aday.faaliyetler:
+        faaliyet_kunye.append(getattr(f, "_kunye", "") or "")
+
+    fdata = [["#", "Kod", "Faaliyet", "Adet", "Puan", "Tür"]]
+    for ri, d in enumerate(pnlar["detaylar"]):
+        fdata.append([
+            str(ri + 1),
+            d["kod"],
+            d["ad"][:60],
+            str(d["adet"]),
+            f"{d['puan']:.2f}",
+            "P-1" if d["puan1_mi"] else "P-2",
+        ])
     fts = tbl_style()
     for ri, d in enumerate(pnlar["detaylar"], 1):
         fts.add("BACKGROUND", (0, ri), (-1, ri),
                 colors.HexColor("#EAF4E8") if d["puan1_mi"]
                 else colors.HexColor("#EAF0FA"))
-    ft = Table(fdata, colWidths=[1.2*cm, 11*cm, 1*cm, 1.5*cm, 2*cm])
+    ft = Table(fdata, colWidths=[0.7*cm, 1.2*cm, 9.5*cm, 0.9*cm, 1.4*cm, 1.2*cm])
     ft.setStyle(fts)
     elems.append(ft)
-    elems.append(Spacer(1, 14))
+    elems.append(Spacer(1, 10))
+
+    # Künye listesi
+    kunye_listesi = [(i+1, k) for i, k in enumerate(faaliyet_kunye) if k.strip()]
+    if kunye_listesi:
+        elems.append(Paragraph("KÜNYE LİSTESİ", s_sec))
+        kunye_data = [["#", "Künye"]]
+        for no, k in kunye_listesi:
+            kunye_data.append([str(no), k[:220]])
+        kts = tbl_style()
+        for ri in range(1, len(kunye_data)):
+            bg = colors.HexColor("#FFFFFF") if ri % 2 == 1 else colors.HexColor("#F4F7FF")
+            kts.add("BACKGROUND", (0, ri), (-1, ri), bg)
+        kt = Table(kunye_data, colWidths=[0.7*cm, 16.8*cm])
+        kt.setStyle(kts)
+        elems.append(kt)
+        elems.append(Spacer(1, 14))
+    else:
+        elems.append(Spacer(1, 14))
 
     elems.append(HRFlowable(width="100%", thickness=0.4,
                              color=colors.HexColor("#AAAAAA")))
