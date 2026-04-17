@@ -1360,19 +1360,12 @@ with tab2:
             value=min(sel_no_val, len(flist)),
             key="v_sel_idx")
         idx_sel = int(sel_no) - 1
-        # sel_no değiştiğinde _duzenle_idx senkronize et
-        if st.session_state.get("_duzenle_ac") and            st.session_state.get("_duzenle_idx") != idx_sel:
-            st.session_state["_duzenle_idx"] = idx_sel
-            st.rerun()
         f_sel = st.session_state.faaliyetler[idx_sel]
 
         act1, act2, act3, act4 = st.columns([1,1,1,1])
 
         with act1:
-            if st.button("✏️  Düzenle", use_container_width=True):
-                st.session_state["_duzenle_idx"] = idx_sel
-                st.session_state["_duzenle_ac"]  = True
-                st.rerun()
+            st.write("")  # Form her zaman açık - düzenle butonu gerekmiyor
 
         with act2:
             if st.button("🗑  Sil", use_container_width=True):
@@ -1387,9 +1380,9 @@ with tab2:
         with act4:
             st.write("")
 
-        # ── Düzenleme formu ────────────────────────────────────────────────
-        if st.session_state.get("_duzenle_ac"):
-            didx = st.session_state.get("_duzenle_idx", 0)
+        # ── Düzenleme formu ─ her zaman seçili satırı göster ───────────
+        if True:
+            didx = idx_sel  # doğrudan number_input'tan al
             if didx < len(st.session_state.faaliyetler):
                 f_d = st.session_state.faaliyetler[didx]
                 bilgi_d = t.EK2_PUANLAR.get(f_d.kod, {})
@@ -1460,14 +1453,11 @@ with tab2:
                         f_d.q_degeri          = yeni_q or None
                         f_d.patent_durum      = yeni_pd
                         f_d._kunye            = yeni_kunye.strip()
-                        st.session_state["_duzenle_ac"]  = False
-                        st.session_state["_duzenle_idx"] = None
                         st.rerun()
                 with db2:
                     if st.button("❌ İptal", use_container_width=True,
                                  key=f"v_d_iptal_{didx}"):
-                        st.session_state["_duzenle_ac"] = False
-                        st.rerun()
+                        st.rerun()  # Sadece sayfayı yenile
     else:
         st.info("Henüz faaliyet eklenmedi. Sol taraftan kategori seçip faaliyet ekleyin.")
 
