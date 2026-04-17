@@ -14,6 +14,7 @@ import os
 import datetime
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 import tnku_atama as t
 
 # ── PDF kütüphanesi ──────────────────────────────────────────────────────────
@@ -44,7 +45,7 @@ st.set_page_config(
 # ─────────────────────────────────────────────────────────────────────────────
 # Google Analytics
 # ─────────────────────────────────────────────────────────────────────────────
-st.markdown("""
+components.html("""
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-QJFQV27KN5"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
@@ -52,7 +53,7 @@ st.markdown("""
   gtag('js', new Date());
   gtag('config', 'G-QJFQV27KN5');
 </script>
-""", unsafe_allow_html=True)
+""", height=0)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CSS  (Google Fonts → Türkçe karakter desteği + responsive tasarım)
