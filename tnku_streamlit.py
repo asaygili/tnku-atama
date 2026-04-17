@@ -1255,6 +1255,14 @@ with tab2:
                 docsn: bool = st.checkbox("Doçentlik Sonrası Faaliyet",
                                           key="v_docsn")
 
+            kunye_giris = st.text_area(
+                "📄 Künye (isteğe bağlı)",
+                key="v_kunye",
+                placeholder="Yazar(lar), Başlık, Dergi/Yayınevi, Yıl, Cilt, Sayfa...",
+                height=68,
+                help="Yayının tam künyesini girin. Düzenleme ve kontrol için kullanılır."
+            )
+
             f_tmp = t.Faaliyet(
                 kod=secili_kod, adet=adet,
                 toplam_yazar=toplam_yazar, yazar_sirasi=yazar_sirasi,
@@ -1282,13 +1290,15 @@ with tab2:
             with ic2:
                 if st.button("➕  Ekle", type="primary",
                              use_container_width=True):
-                    st.session_state.faaliyetler.append(t.Faaliyet(
+                    _f_yeni = t.Faaliyet(
                         kod=secili_kod, adet=adet,
                         toplam_yazar=toplam_yazar, yazar_sirasi=yazar_sirasi,
                         sorumlu_veya_senyör=sorumlu, q_degeri=q_val,
                         patent_durum=patent_durum,
                         ikinci_danisман=ikinci_dan, docent_sonrasi=docsn,
-                    ))
+                    )
+                    _f_yeni._kunye = (kunye_giris or "").strip()
+                    st.session_state.faaliyetler.append(_f_yeni)
                     st.rerun()
 
     # ── Eklenen Faaliyetler ──────────────────────────────────────────────────
@@ -1311,14 +1321,44 @@ with tab2:
     if flist:
         rows = _faaliyet_satirlari(kadro_su)
         df   = pd.DataFrame(rows).set_index("#")
-        st.dataframe(
-            df.style.map(_tur_renk, subset=["Tur"]),
-            use_container_width=True,
-            height=min(420, 50 + 36 * len(rows)),
-        )
+
+        # Satır seçimi: on_select ile tıklama → düzenleme formuna aktarır
+        try:
+            tablo_sec = st.dataframe(
+                df.style.map(_tur_renk, subset=["Tur"]),
+                use_container_width=True,
+                height=min(420, 50 + 36 * len(rows)),
+                on_select="rerun",
+                selection_mode="single-row",
+                key="v_tablo_sec",
+            )
+            # Seçilen satırı al
+            secili_satirlar = tablo_sec.selection.rows if tablo_sec.selection else []
+            if secili_satirlar:
+                otomatik_idx = secili_satirlar[0]
+                if st.session_state.get("_tablo_onceki_sec") != otomatik_idx:
+                    st.session_state["_duzenle_idx"] = otomatik_idx
+                    st.session_state["_duzenle_ac"]  = True
+                    st.session_state["_tablo_onceki_sec"] = otomatik_idx
+        except Exception:
+            # Eski Streamlit sürümü - on_select desteklenmiyor
+            st.dataframe(
+                df.style.map(_tur_renk, subset=["Tur"]),
+                use_container_width=True,
+                height=min(420, 50 + 36 * len(rows)),
+            )
+
+        # Seçim numarası - tıklama yoksa number_input'tan al
+        duzenle_idx_var = st.session_state.get("_duzenle_idx")
+        if duzenle_idx_var is not None and st.session_state.get("_duzenle_ac"):
+            sel_no_val = duzenle_idx_var + 1
+        else:
+            sel_no_val = 1
         sel_no = st.number_input(
             "İşlem yapılacak # numarası",
-            min_value=1, max_value=len(flist), step=1, key="v_sel_idx")
+            min_value=1, max_value=len(flist), step=1,
+            value=min(sel_no_val, len(flist)),
+            key="v_sel_idx")
         idx_sel = int(sel_no) - 1
         f_sel   = st.session_state.faaliyetler[idx_sel]
 
@@ -1328,6 +1368,7 @@ with tab2:
             if st.button("✏️  Düzenle", use_container_width=True):
                 st.session_state["_duzenle_idx"] = idx_sel
                 st.session_state["_duzenle_ac"]  = True
+                st.rerun()
 
         with act2:
             if st.button("🗑  Sil", use_container_width=True):
@@ -1351,10 +1392,15 @@ with tab2:
                 st.divider()
                 st.markdown(f"**✏️ #{didx+1} numaralı faaliyet düzenleniyor**")
 
-                # Künye göster (varsa)
-                kunye_d = getattr(f_d, "_kunye", "")
-                if kunye_d:
-                    st.caption(f"📄 Künye: {kunye_d}")
+                # Künye düzenleme
+                kunye_d = getattr(f_d, "_kunye", "") or ""
+                yeni_kunye = st.text_area(
+                    "📄 Künye",
+                    value=kunye_d,
+                    height=68,
+                    placeholder="Yazar(lar), Başlık, Dergi/Yayınevi, Yıl...",
+                    key="v_d_kunye"
+                )
 
                 dc1, dc2, dc3 = st.columns([2,1,1])
                 with dc1:
@@ -1405,7 +1451,9 @@ with tab2:
                         f_d.sorumlu_veya_senyör = yeni_sorumlu
                         f_d.q_degeri          = yeni_q or None
                         f_d.patent_durum      = yeni_pd
-                        st.session_state["_duzenle_ac"] = False
+                        f_d._kunye            = yeni_kunye.strip()
+                        st.session_state["_duzenle_ac"]  = False
+                        st.session_state["_duzenle_idx"] = None
                         st.rerun()
                 with db2:
                     if st.button("❌ İptal", use_container_width=True,
