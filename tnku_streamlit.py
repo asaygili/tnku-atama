@@ -17,6 +17,188 @@ import streamlit as st
 import streamlit.components.v1 as components
 import tnku_atama as t
 
+# ══════════════════════════════════════════════════════════════════════════════
+# ÜAK Mühendislik Temel Alanı Doçentlik Kriterleri (Mart 2024+)
+# Kaynak: ÜAK Tablo 9
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _uak_muh_puan_hesapla(faaliyetler: list, doktora_sonrasi_mu: bool = True) -> dict:
+    """
+    ÜAK Mühendislik Temel Alanı puan sistemiyle hesaplama.
+    Faaliyetler t.Faaliyet listesidir.
+    
+    Zorunlu kriterler (Mart 2024+):
+    - Toplam: ≥100 puan
+    - Doktora sonrası: ≥90 puan (tezden üretilen hariç)
+    - SCI/SSCI Q1-Q3 makalelerden en az 40 puan + başlıca yazar olma
+    - TR Dizin'den en az 10 puan
+    - Tezden üretilen ≥1 yayın (bildiri olmayan)
+    - Atıf: ≥5 puan (en fazla 10)
+    - Bildiri: ≥5 puan (en fazla 20)
+    - Ders: ≥4 dönem (≥4 puan)
+    """
+    sonuc = {
+        "ulusl_q1q3_puan":   0.0,   # SCI/SSCI Q1-Q3
+        "ulusl_diger_puan":  0.0,   # ESCI/Scopus/diğer
+        "ulusal_puan":       0.0,   # TR Dizin
+        "bildiri_puan":      0.0,
+        "atif_puan":         0.0,
+        "tez_yayini":        False,
+        "ders_puan":         0.0,
+        "proje_puan":        0.0,
+        "toplam":            0.0,
+    }
+
+    # EK-2 → ÜAK puan dönüşüm tablosu (Mühendislik Tablo 9)
+    # Uluslararası makale puanları (ÜAK puanları - başlıca yazar)
+    UAK_ULUSL = {
+        "1.1": {"Q1": 30, "Q2": 20, "Q3": 15, "Q4": 10, None: 10},  # SCI/SSCI
+        "1.3": {"Q1": 30, "Q2": 20, "Q3": 15, "Q4": 10, None: 10},  # SSCI/AHCI derleme
+        "1.4": 10,   # ESCI/Scopus
+        "1.5": 5,    # Diğer uluslararası
+        "1.7": 5,    # Diğer ulusl. hakemli
+    }
+    UAK_ULUSAL = {
+        "1.6": 8,    # TR Dizin
+        "1.8": 4,    # Diğer ulusal
+    }
+    # Bildiri (Tablo 9'da kitap yerine bildiri var)
+    UAK_BILDIRI = {
+        "3.1": 5,    # CPCI tam metin (davetli)
+        "3.2": 5,    # CPCI tam metin
+        "3.3": 3,    # Uluslararası özet
+        "3.4": 3,    # Uluslararası poster
+        "3.6": 2,    # Ulusal tam metin
+        "3.7": 2,    # Ulusal özet
+        "3.8": 2,    # Ulusal poster
+    }
+    UAK_ATIF = {
+        "5.1": 3,    # SCI/SSCI/AHCI/ESCI/Scopus atıf
+        "5.2": 3,
+        "5.5": 2,    # TR Dizin atıf
+        "5.6": 1,    # Diğer
+    }
+    UAK_DERS = {
+        "17.4": 1,   # Her dönem 1 puan (max 4 dönem=4 puan)
+    }
+    UAK_PROJE = {
+        "12.1": 15, "12.3": 15, "12.5": 10, "12.7": 8,
+        "12.2": 8,  "12.4": 8,  "12.6": 5,  "12.8": 5,
+        "12.11":5,  "12.13":5,  "12.12":3,  "12.14":3,
+    }
+
+    for f in faaliyetler:
+        kod = f.kod
+        adet = f.adet or 1
+        q    = f.q_degeri
+
+        # Başlıca yazar kontrolü (tek yazar veya lisansüstü öğrenciyle)
+        baslica = (f.toplam_yazar == 1 or f.sorumlu_veya_senyör or
+                   f.yazar_sirasi == 1)
+
+        # Uluslararası makale
+        if kod in ("1.1", "1.3"):
+            # Q değerine göre ÜAK puanı
+            q_puan_map = {"Q1": 30, "Q2": 20, "Q3": 15, "Q4": 10}
+            q_puan = q_puan_map.get(q, 10) if q else 10
+            # Yazar çarpanı (ÜAK: başlıca yazar tam puan, diğerleri orantılı)
+            carpan = 1.0 if baslica else max(0.3, 1/max(f.toplam_yazar, 1))
+            p = q_puan * carpan * adet
+            sonuc["ulusl_q1q3_puan"] += p
+            sonuc["toplam"] += p
+
+        elif kod in ("1.4", "1.5", "1.7"):
+            p_baz = UAK_ULUSL.get(kod, 5)
+            carpan = 1.0 if baslica else max(0.3, 1/max(f.toplam_yazar, 1))
+            p = p_baz * carpan * adet
+            sonuc["ulusl_diger_puan"] += p
+            sonuc["toplam"] += p
+
+        elif kod in UAK_ULUSAL:
+            p = UAK_ULUSAL[kod] * adet
+            sonuc["ulusal_puan"] += p
+            sonuc["toplam"] += p
+
+        elif kod in UAK_BILDIRI:
+            p = UAK_BILDIRI[kod] * adet
+            # Bildiri max 20 puan
+            p = min(p, max(0, 20 - sonuc["bildiri_puan"]))
+            sonuc["bildiri_puan"] += p
+            sonuc["toplam"] += p
+
+        elif kod in UAK_ATIF:
+            p = UAK_ATIF[kod] * adet
+            # Atıf max 10 puan
+            p = min(p, max(0, 10 - sonuc["atif_puan"]))
+            sonuc["atif_puan"] += p
+            sonuc["toplam"] += p
+
+        elif kod == "17.4":
+            p = min(adet * 1, 4)  # Max 4 puan (4 dönem)
+            sonuc["ders_puan"] += p
+            sonuc["toplam"] += p
+
+        elif kod in UAK_PROJE:
+            p = UAK_PROJE[kod] * adet
+            p = min(p, max(0, 30 - sonuc["proje_puan"]))  # Max 30
+            sonuc["proje_puan"] += p
+            sonuc["toplam"] += p
+
+    # Tezden üretilen yayın kontrolü (1.1-1.8 kodlu, bildiri değil)
+    # Kullanıcı bunu ayrıca işaretlemeli - burada sadece makale varlığına bakıyoruz
+    makale_var = any(f.kod in ("1.1","1.3","1.4","1.5","1.6","1.7","1.8")
+                     for f in faaliyetler)
+    sonuc["tez_yayini"] = makale_var  # Ön varsayım
+
+    # Kriterler
+    kriterler = []
+
+    def _krit(ad, saglandi, deger=""):
+        kriterler.append({
+            "kriter": ad, "saglandi": saglandi, "deger": deger
+        })
+
+    _krit(
+        f"Toplam puan ≥ 100 (ÜAK sistemi)",
+        sonuc["toplam"] >= 100,
+        f"{sonuc['toplam']:.1f} puan"
+    )
+    _krit(
+        f"SCI/SSCI Q1-Q3 makalelerden ≥ 40 puan + başlıca yazar",
+        sonuc["ulusl_q1q3_puan"] >= 40,
+        f"{sonuc['ulusl_q1q3_puan']:.1f} puan"
+    )
+    _krit(
+        "TR Dizin makalelerden ≥ 10 puan",
+        sonuc["ulusal_puan"] >= 10,
+        f"{sonuc['ulusal_puan']:.1f} puan"
+    )
+    _krit(
+        "Atıf ≥ 5 puan (en fazla 10)",
+        sonuc["atif_puan"] >= 5,
+        f"{sonuc['atif_puan']:.1f} puan"
+    )
+    _krit(
+        "Bildiri ≥ 5 puan (en fazla 20)",
+        sonuc["bildiri_puan"] >= 5,
+        f"{sonuc['bildiri_puan']:.1f} puan"
+    )
+    _krit(
+        "Ders ≥ 4 dönem (≥ 4 puan)",
+        sonuc["ders_puan"] >= 4,
+        f"{sonuc['ders_puan']:.0f} puan (dönem)"
+    )
+    _krit(
+        "Tezden üretilmiş en az 1 yayın (bildiri olmayan) — doğrulayın",
+        sonuc["tez_yayini"],
+        "Makale mevcut (tezden üretilip üretilmediğini teyit edin)"
+    )
+
+    sonuc["kriterler"] = kriterler
+    sonuc["genel_ok"] = all(k["saglandi"] for k in kriterler)
+    return sonuc
+
+
 # ── AVES Otomatik Yükleme ────────────────────────────────────────────────────
 try:
     import sys as _sys, os as _os, json as _json, hashlib as _hashlib, re as _re_aves
@@ -1922,6 +2104,71 @@ son_aday = st.session_state.son_aday
 
 if sonuc is not None and son_aday is not None:
     st.divider()
+
+    # ── ÜAK Mühendislik Kriteri Paneli ──────────────────────────────────────
+    # Alan-1 (Fen/Müh) ve Mühendislik temel alanı için göster
+    _alan_str = son_aday.alan or ""
+    _is_muh   = "ALAN-1" in _alan_str  # Fen/Sağlık/Müh/Matematik
+
+    if _is_muh and son_aday.kadro_turu in ("docent", "profesor"):
+        # Doçentlik başvurusu: tüm faaliyetler
+        # Profesörlük: doçentlik sonrası faaliyetler (Madde 11b2)
+        if son_aday.kadro_turu == "docent":
+            _uak_faaliyetler = son_aday.faaliyetler
+            _uak_baslik = "ÜAK Mühendislik Doçentlik Kriterleri (Tüm Faaliyetler)"
+        else:
+            _uak_faaliyetler = [f for f in son_aday.faaliyetler if f.docent_sonrasi]
+            _uak_baslik = "ÜAK Mühendislik Doçentlik Kriterleri — Doçentlik Sonrası (Madde 11b2)"
+
+        _uak_sonuc = _uak_muh_puan_hesapla(_uak_faaliyetler)
+        _uak_genel = _uak_sonuc["genel_ok"]
+
+        with st.expander(
+            f"{'✅' if _uak_genel else '⚠️'} {_uak_baslik}",
+            expanded=not _uak_genel
+        ):
+            st.caption(
+                "ÜAK Mühendislik Temel Alanı puanlama sistemiyle hesaplanmıştır "
+                "(Mart 2024+ kriterleri, Tablo 9). "
+                "Atıf, ders ve tezden üretilen yayın bilgilerini manuel olarak doğrulayın."
+            )
+            st.markdown(
+                "[🔗 ÜAK Doçentlik Başvuru Şartları]"
+                "(https://www.uak.gov.tr/page/docentlik-basvuru-sartlari-kLPHX)"
+            )
+
+            # Puan özeti
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Toplam Puan", f"{_uak_sonuc['toplam']:.1f}",
+                      delta="≥100 gerekli",
+                      delta_color="normal" if _uak_sonuc["toplam"] >= 100 else "inverse")
+            m2.metric("SCI/SSCI Q1-Q3", f"{_uak_sonuc['ulusl_q1q3_puan']:.1f}",
+                      delta="≥40 gerekli",
+                      delta_color="normal" if _uak_sonuc["ulusl_q1q3_puan"] >= 40 else "inverse")
+            m3.metric("TR Dizin", f"{_uak_sonuc['ulusal_puan']:.1f}",
+                      delta="≥10 gerekli",
+                      delta_color="normal" if _uak_sonuc["ulusal_puan"] >= 10 else "inverse")
+            m4.metric("Atıf", f"{_uak_sonuc['atif_puan']:.1f}",
+                      delta="≥5 gerekli",
+                      delta_color="normal" if _uak_sonuc["atif_puan"] >= 5 else "inverse")
+
+            # Kriter tablosu
+            st.divider()
+            for krit in _uak_sonuc["kriterler"]:
+                ikon = "✅" if krit["saglandi"] else "❌"
+                st.markdown(
+                    f"{ikon} **{krit['kriter']}** "
+                    f"<span style='color:#64748b;font-size:0.85em'>{krit['deger']}</span>",
+                    unsafe_allow_html=True
+                )
+
+            if not _uak_genel:
+                st.warning(
+                    "⚠️ Bazı ÜAK kriterleri sağlanamamaktadır. "
+                    "Eksik faaliyetleri Faaliyetler sekmesinden ekleyin."
+                )
+            else:
+                st.success("✅ Tüm ÜAK Mühendislik kriterleri sağlanmaktadır.")
 
     # Profesör için doçentlik sonrası puan özeti
     if son_aday.kadro_turu == "profesor":
