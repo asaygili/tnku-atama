@@ -474,7 +474,9 @@ try:
             for o in blok.get("ogeler", []):
                 metin  = o.get("metin", "")
                 endeks = o.get("endeks", []) or []
-                q      = o.get("q") or _kunye_q_bul(metin) or _aves_q_bul(metin)
+                # Q değeri sadece 1.1, 1.3, 4.1 kodlarında geçerli
+                _q_ham = o.get("q") or _kunye_q_bul(metin) or _aves_q_bul(metin)
+                q      = _q_ham if kod in ("1.1", "1.3", "4.1") else None
                 si, toplam, sorumlu = _yazar_sirasi_bul(metin, isim)
                 if kat_key == "ulusal_makale":
                     eks_str = " ".join(endeks).upper()
@@ -1641,12 +1643,16 @@ with tab2:
                     yeni_adet = st.number_input(
                         "Adet", min_value=1, value=f_d.adet, key=f"adt_{didx}")
                 with dc3:
-                    yeni_q = st.selectbox(
-                        "Q Değeri",
-                        options=["", "Q1", "Q2", "Q3", "Q4"],
-                        index=["", "Q1", "Q2", "Q3", "Q4"].index(f_d.q_degeri or ""),
-                        key=f"q_{didx}",
-                    )
+                    if yeni_kod in ("1.1", "1.3", "4.1"):
+                        yeni_q = st.selectbox(
+                            "Q Değeri",
+                            options=["", "Q1", "Q2", "Q3", "Q4"],
+                            index=["", "Q1", "Q2", "Q3", "Q4"].index(f_d.q_degeri or ""),
+                            key=f"q_{didx}",
+                        )
+                    else:
+                        yeni_q = None
+                        st.caption("Q: bu kod için geçersiz")
 
                 dd1, dd2, dd3 = st.columns([1, 1, 2])
                 with dd1:
