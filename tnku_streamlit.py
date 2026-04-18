@@ -1128,8 +1128,19 @@ def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
     elems.append(at)
     elems.append(Spacer(1, 10))
 
+    # 5 yıl kriteri kontrolü
+    import datetime as _dt_pdf
+    _p5ok_pdf = True
+    _p5msg_pdf = ""
+    _doc_yil_pdf = int(aday.__dict__.get("_docent_yil", 0) or 0)
+    if hasattr(aday, "_docent_yil") and aday._docent_yil and aday.kadro_turu == "profesor":
+        _gecen_pdf = _dt_pdf.date.today().year - aday._docent_yil
+        if _gecen_pdf < 5:
+            _p5ok_pdf = False
+            _p5msg_pdf = f"Docent unvanindan bu yana {_gecen_pdf} yil gecmistir (en az 5 yil gereklidir)."
+
     gtxt = ("TUM KRITERLER SAGLANIYOR - BASVURU YAPILABILIR"
-            if genel else
+            if (genel and _p5ok_pdf) else
             "BAZI KRITERLER SAGLANMIYOR - BASVURU YAPILAMAZ")
     gc = colors.HexColor("#1A7A3A") if genel else colors.HexColor("#C0392B")
     gt = Table([[gtxt]], colWidths=[W - 3.6*cm])
@@ -1143,6 +1154,14 @@ def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
         ("BOTTOMPADDING", (0,0), (-1,-1), 10),
     ]))
     elems.append(gt)
+    if not _p5ok_pdf and _p5msg_pdf:
+        elems.append(Spacer(1, 4))
+        elems.append(Paragraph(
+            f"UYARI: {_p5msg_pdf}",
+            ParagraphStyle("p5uyari", fontName=fb, fontSize=9, leading=12,
+                           textColor=colors.HexColor("#C0392B"),
+                           backColor=colors.HexColor("#FFEBEE"),
+                           borderPadding=6)))
     elems.append(Spacer(1, 10))
 
     elems.append(Paragraph("PUAN OZETI", s_sec))
@@ -1216,21 +1235,77 @@ def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
     elems.append(ft)
     elems.append(Spacer(1, 10))
 
-    # Künye listesi
+    # Künye listesi - yapısal, sarma destekli
+    import re as _re_pdf
+
+    def _kunye_parcala(k):
+        parcalar = [p.strip() for p in k.split(',')]
+        BAG = {'a','an','the','in','of','and','or','for','with','by','ve','ile'}
+        def _yz(p):
+            kel = p.split()
+            if not kel or len(kel) > 4: return False
+            if ':' in p: return False
+            if any(_re_pdf.search(r'[0-9]', x) for x in kel): return False
+            if any(x.lower() in BAG for x in kel): return False
+            return all(x[0].isupper() for x in kel if x)
+        yazarlar = []; yb = 0
+        for i, p in enumerate(parcalar):
+            if _yz(p): yazarlar.append(p); yb = i+1
+            else: break
+        kalan = parcalar[yb:]
+        vi = len(kalan)
+        for i, p in enumerate(kalan):
+            if _re_pdf.match(r'^(vol|volume|cilt|say|no\b|pp\b|page|\d{4}$|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|oca|sub|nis|haz|tem|agu|eyl|eki|kas|ara)', p.lower().strip()):
+                vi = i; break
+        orta = kalan[:vi]
+        baslik = orta[0] if orta else ""
+        dergi  = ', '.join(orta[1:]) if len(orta) > 1 else ""
+        vol_pp_yil = kalan[vi:]
+        yil = next((_re_pdf.search(r'\b(20\d{2}|19\d{2})\b', p).group(1)
+                    for p in vol_pp_yil if _re_pdf.search(r'\b(20\d{2}|19\d{2})\b', p)), "")
+        vol_pp = ', '.join(p for p in vol_pp_yil
+                           if not _re_pdf.match(r'^\d{4}[.,]?$', p.strip()))
+        return {"yazarlar": yazarlar, "baslik": baslik.strip(),
+                "dergi": dergi.strip(), "vol_pp": vol_pp.strip(), "yil": yil}
+
+    s_kh = ParagraphStyle("kh", fontName=fb, fontSize=8.5, leading=11,
+                           textColor=colors.HexColor("#1A2B4A"), spaceBefore=10, spaceAfter=1)
+    s_ks = ParagraphStyle("ks", fontName=fr, fontSize=8, leading=10,
+                           leftIndent=12, spaceAfter=1, textColor=colors.HexColor("#333333"))
+    s_kb = ParagraphStyle("kb", fontName=fr, fontSize=8, leading=10,
+                           leftIndent=12, spaceAfter=3, textColor=colors.HexColor("#2E5DA3"))
+
     kunye_listesi = [(i+1, k) for i, k in enumerate(faaliyet_kunye) if k.strip()]
     if kunye_listesi:
-        elems.append(Paragraph("KÜNYE LİSTESİ", s_sec))
-        kunye_data = [["#", "Künye"]]
+        elems.append(Paragraph("KUNYE LISTESI", s_sec))
         for no, k in kunye_listesi:
-            kunye_data.append([str(no), k[:220]])
-        kts = tbl_style()
-        for ri in range(1, len(kunye_data)):
-            bg = colors.HexColor("#FFFFFF") if ri % 2 == 1 else colors.HexColor("#F4F7FF")
-            kts.add("BACKGROUND", (0, ri), (-1, ri), bg)
-        kt = Table(kunye_data, colWidths=[0.7*cm, 16.8*cm])
-        kt.setStyle(kts)
-        elems.append(kt)
-        elems.append(Spacer(1, 14))
+            f_idx = no - 1
+            fo = aday.faaliyetler[f_idx] if f_idx < len(aday.faaliyetler) else None
+            p  = _kunye_parcala(k)
+            # --- Başlık satırı ---
+            elems.append(Paragraph(f"<b>#{no}</b>  {fo.kod if fo else ''}", s_kh))
+            # --- Yazarlar ---
+            if p["yazarlar"]:
+                yz_txt = ", ".join(p["yazarlar"])
+                if fo and fo.toplam_yazar > 0:
+                    yz_bilgi = f"({fo.yazar_sirasi}/{fo.toplam_yazar}. yazar"
+                    if fo.sorumlu_veya_senyör: yz_bilgi += " - Sorumlu"
+                    yz_bilgi += ")"
+                    yz_txt += "  " + yz_bilgi
+                elems.append(Paragraph("Yazarlar: " + yz_txt, s_ks))
+            # --- Başlık ---
+            if p["baslik"]:
+                elems.append(Paragraph("Baslik: " + p["baslik"], s_ks))
+            # --- Dergi / Cilt / Sayfa / Yıl / Q ---
+            dergi_parts = []
+            if p["dergi"]:  dergi_parts.append(p["dergi"])
+            if p["vol_pp"]: dergi_parts.append(p["vol_pp"])
+            if p["yil"]:    dergi_parts.append(p["yil"])
+            if fo and fo.q_degeri: dergi_parts.append("[" + fo.q_degeri + "]")
+            if fo and fo.docent_sonrasi: dergi_parts.append("[Docent Sonrasi]")
+            if dergi_parts:
+                elems.append(Paragraph(", ".join(dergi_parts), s_kb))
+        elems.append(Spacer(1, 10))
     else:
         elems.append(Spacer(1, 14))
 
@@ -1757,16 +1832,22 @@ with bar2:
             # Profesör için 5 yıl kriteri kontrolü
             _kadro_h = st.session_state.get("v_kadro","")
             _doc_yil_h = int(st.session_state.get("v_docent_yil", 0) or 0)
+            import datetime as _dt2
+            _prof_5yil_ok = True
+            _prof_5yil_mesaj = ""
             if _kadro_h == "profesor" and _doc_yil_h > 0:
-                import datetime as _dt2
                 _gecen_h = _dt2.date.today().year - _doc_yil_h
                 if _gecen_h < 5:
-                    st.error(
-                        f"❌ Profesör başvurusu için doçentlik üzerinden en az **5 yıl** "
-                        f"geçmesi gerekir. Şu an {_gecen_h} yıl geçmiş."
+                    _prof_5yil_ok = False
+                    _prof_5yil_mesaj = (
+                        f"Doçentlik üzerinden {_gecen_h} yıl geçmiş "
+                        f"(en az 5 yıl gereklidir)."
                     )
-                    st.stop()
+            st.session_state["_prof_5yil_ok"]    = _prof_5yil_ok
+            st.session_state["_prof_5yil_mesaj"] = _prof_5yil_mesaj
             aday = _aday_olustur()
+            # Doçentlik yılını adaya ekle (PDF için)
+            aday._docent_yil = _doc_yil_h
             st.session_state.son_aday = aday
             st.session_state.sonuc    = t.kriter_kontrol(aday)
             st.rerun()
@@ -1804,11 +1885,17 @@ if sonuc is not None and son_aday is not None:
     }.get(son_aday.kadro_turu, "–")
 
     # ── Sonuç bandı ──────────────────────────────────────────────────────────
-    ikon  = "✅" if genel else "❌"
+    # 5 yıl kriteri
+    _p5ok  = st.session_state.get("_prof_5yil_ok", True)
+    _p5msg = st.session_state.get("_prof_5yil_mesaj", "")
+    if not _p5ok:
+        st.error(f"⛔ PROFESÖRLÜK BAŞVURUSU UYGUN DEĞİL: {_p5msg}")
+
+    ikon  = "✅" if (genel and _p5ok) else "❌"
     gtxt  = ("TÜM KRİTERLER SAĞLANIYOR – BAŞVURU YAPILABİLİR"
-             if genel else
+             if (genel and _p5ok) else
              "BAZI KRİTERLER SAĞLANMIYOR – BAŞVURU YAPILAMAZ")
-    cls   = "sonuc-ok" if genel else "sonuc-fail"
+    cls   = "sonuc-ok" if (genel and _p5ok) else "sonuc-fail"
     st.markdown(f'<div class="{cls}">{ikon}  {gtxt}</div>',
                 unsafe_allow_html=True)
 
