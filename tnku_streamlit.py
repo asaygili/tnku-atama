@@ -1360,7 +1360,20 @@ with tab1:
     with dl3:
         st.number_input("Doçent sonrası yükseköğretim süresi (yıl)", key="v_docsure",
                         min_value=0.0, max_value=40.0, step=0.5,
-                        help="Prof. için ≥2.5 yıl gerekli")
+                        help="Prof. için ≥2.5 yıl yükseköğretim, ≥5 yıl doçentlik gerekli")
+        # Doçentlik yılına göre otomatik hesap
+        if st.session_state.get("v_kadro") == "profesor":
+            _doc_yil = int(st.session_state.get("v_docent_yil", 0) or 0)
+            if _doc_yil > 0:
+                import datetime as _dt
+                _gecen = _dt.date.today().year - _doc_yil
+                if _gecen < 5:
+                    st.warning(
+                        f"⚠️ Doçentlik üzerinden {_gecen} yıl geçmiş. "
+                        f"Profesör başvurusu için en az **5 yıl** geçmesi gerekir."
+                    )
+                else:
+                    st.success(f"✅ Doçentlik üzerinden {_gecen} yıl geçmiş.")
 
     st.divider()
 
@@ -1741,6 +1754,18 @@ with bar2:
         if not st.session_state.faaliyetler:
             st.error("Önce en az bir faaliyet ekleyin.")
         else:
+            # Profesör için 5 yıl kriteri kontrolü
+            _kadro_h = st.session_state.get("v_kadro","")
+            _doc_yil_h = int(st.session_state.get("v_docent_yil", 0) or 0)
+            if _kadro_h == "profesor" and _doc_yil_h > 0:
+                import datetime as _dt2
+                _gecen_h = _dt2.date.today().year - _doc_yil_h
+                if _gecen_h < 5:
+                    st.error(
+                        f"❌ Profesör başvurusu için doçentlik üzerinden en az **5 yıl** "
+                        f"geçmesi gerekir. Şu an {_gecen_h} yıl geçmiş."
+                    )
+                    st.stop()
             aday = _aday_olustur()
             st.session_state.son_aday = aday
             st.session_state.sonuc    = t.kriter_kontrol(aday)
