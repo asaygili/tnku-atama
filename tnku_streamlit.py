@@ -1977,7 +1977,7 @@ if sonuc is not None and son_aday is not None:
                 else:
                     st.warning("⚠️ ÜAK Madde 11(b)-2 kriteri henüz teyit edilmemiştir.")
 
-        pnlar = sonuc["puanlar"]
+    pnlar = sonuc["puanlar"]
     genel = sonuc["genel_sonuc"]
 
     kadro_adi_tam = {
