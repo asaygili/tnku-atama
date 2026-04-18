@@ -474,16 +474,18 @@ try:
             for o in blok.get("ogeler", []):
                 metin  = o.get("metin", "")
                 endeks = o.get("endeks", []) or []
-                # Q değeri sadece 1.1, 1.3, 4.1 kodlarında geçerli
-                _q_ham = o.get("q") or _kunye_q_bul(metin) or _aves_q_bul(metin)
-                q      = _q_ham if kod in ("1.1", "1.3", "4.1") else None
                 si, toplam, sorumlu = _yazar_sirasi_bul(metin, isim)
+                # Önce kodu belirle
                 if kat_key == "ulusal_makale":
                     eks_str = " ".join(endeks).upper()
                     kod = "1.6" if "TRDIZIN" in eks_str or "TR DİZİN" in eks_str else "1.8"
-                    q   = None
                 else:
                     kod = _makale_kod(endeks, metin)
+                # Q değeri sadece 1.1, 1.3, 4.1 için geçerli
+                if kod in ("1.1", "1.3", "4.1"):
+                    q = o.get("q") or _kunye_q_bul(metin) or _aves_q_bul(metin)
+                else:
+                    q = None
                 f_obj = t.Faaliyet(
                     kod=kod, adet=1,
                     toplam_yazar=toplam, yazar_sirasi=si,
