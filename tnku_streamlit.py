@@ -1132,15 +1132,23 @@ def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
     import datetime as _dt_pdf
     _p5ok_pdf = True
     _p5msg_pdf = ""
-    _doc_yil_pdf = int(aday.__dict__.get("_docent_yil", 0) or 0)
+    _uak_pdf = True
+    _uak_pdf_msg = ""
     if hasattr(aday, "_docent_yil") and aday._docent_yil and aday.kadro_turu == "profesor":
         _gecen_pdf = _dt_pdf.date.today().year - aday._docent_yil
         if _gecen_pdf < 5:
             _p5ok_pdf = False
             _p5msg_pdf = f"Docent unvanindan bu yana {_gecen_pdf} yil gecmistir (en az 5 yil gereklidir)."
+        if not getattr(aday, "_uak_krit_teyit", False):
+            _uak_pdf = False
+            _uak_pdf_msg = (
+                f"Madde 11(b)-2: {aday._docent_yil} donemi UAK docentlik kriterleri "
+                f"docentlik sonrasi calismalarda yeniden saglandigina dair teyit eksik."
+            )
 
+    _ek_ok_pdf = _p5ok_pdf and _uak_pdf
     gtxt = ("TUM KRITERLER SAGLANIYOR - BASVURU YAPILABILIR"
-            if (genel and _p5ok_pdf) else
+            if (genel and _ek_ok_pdf) else
             "BAZI KRITERLER SAGLANMIYOR - BASVURU YAPILAMAZ")
     gc = colors.HexColor("#1A7A3A") if genel else colors.HexColor("#C0392B")
     gt = Table([[gtxt]], colWidths=[W - 3.6*cm])
@@ -1154,14 +1162,18 @@ def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
         ("BOTTOMPADDING", (0,0), (-1,-1), 10),
     ]))
     elems.append(gt)
-    if not _p5ok_pdf and _p5msg_pdf:
-        elems.append(Spacer(1, 4))
-        elems.append(Paragraph(
-            f"UYARI: {_p5msg_pdf}",
-            ParagraphStyle("p5uyari", fontName=fb, fontSize=9, leading=12,
-                           textColor=colors.HexColor("#C0392B"),
-                           backColor=colors.HexColor("#FFEBEE"),
-                           borderPadding=6)))
+    for _uyari_msg in [
+        _p5msg_pdf if not _p5ok_pdf else "",
+        _uak_pdf_msg if not _uak_pdf else "",
+    ]:
+        if _uyari_msg:
+            elems.append(Spacer(1, 4))
+            elems.append(Paragraph(
+                f"UYARI: {_uyari_msg}",
+                ParagraphStyle("puyari", fontName=fb, fontSize=9, leading=12,
+                               textColor=colors.HexColor("#C0392B"),
+                               backColor=colors.HexColor("#FFEBEE"),
+                               borderPadding=6)))
     elems.append(Spacer(1, 10))
 
     elems.append(Paragraph("PUAN OZETI", s_sec))
@@ -1394,6 +1406,30 @@ with tab1:
                 help="Doçentlik unvanını aldığınız yıl. Yayın yılı bu yıldan "
                      "sonraysa 'Doçentlik Sonrası' otomatik işaretlenir."
             )
+            # ÜAK doçentlik kriteri teyidi
+            _doc_yil_v = int(st.session_state.get("v_docent_yil", 0) or 0)
+            if _doc_yil_v > 0:
+                # Doçentlik dönemini tahmin et (Mart veya Ekim)
+                _doc_donem = f"{_doc_yil_v} dönemi"
+                st.info(
+                    f"📋 **Madde 11(b)-2 Kriteri:**  "
+                    f"Doçentlik unvanını aldığınız dönemdeki ({_doc_donem}) "
+                    f"ÜAK başvuru kriterlerini **doçentlik sonrası** "
+                    f"çalışmalarınızla yeniden sağlamış olmanız gerekir "
+                    f"(tezden üretilen yayın şartı hariç).",
+                    icon="ℹ️"
+                )
+                st.markdown(
+                    f"[🔗 ÜAK Doçentlik Başvuru Şartları Arşivi]"
+                    f"(https://www.uak.gov.tr/page/docentlik-basvuru-sartlari-kLPHX)",
+                )
+                st.checkbox(
+                    f"✅ {_doc_yil_v} dönemindeki ÜAK doçentlik kriterlerini "
+                    f"doçentlik sonrası çalışmalarımla yeniden sağladığımı teyit ediyorum "
+                    f"(tezden üretilen yayın hariç).",
+                    key="v_uak_docent_kriteri",
+                    help="Madde 11(b)-2 gereği profesörlük başvurusu için zorunludur."
+                )
 
     st.divider()
 
@@ -1843,11 +1879,24 @@ with bar2:
                         f"Doçentlik üzerinden {_gecen_h} yıl geçmiş "
                         f"(en az 5 yıl gereklidir)."
                     )
+            # ÜAK Madde 11(b)-2 kriteri teyidi
+            _uak_krit_ok = True
+            _uak_krit_mesaj = ""
+            if _kadro_h == "profesor" and _doc_yil_h > 0:
+                if not st.session_state.get("v_uak_docent_kriteri", False):
+                    _uak_krit_ok = False
+                    _uak_krit_mesaj = (
+                        f"Madde 11(b)-2: {_doc_yil_h} dönemindeki ÜAK doçentlik "
+                        f"kriterlerini yeniden sağladığınızı teyit etmediniz."
+                    )
             st.session_state["_prof_5yil_ok"]    = _prof_5yil_ok
             st.session_state["_prof_5yil_mesaj"] = _prof_5yil_mesaj
+            st.session_state["_uak_krit_ok"]     = _uak_krit_ok
+            st.session_state["_uak_krit_mesaj"]  = _uak_krit_mesaj
             aday = _aday_olustur()
             # Doçentlik yılını adaya ekle (PDF için)
-            aday._docent_yil = _doc_yil_h
+            aday._docent_yil     = _doc_yil_h
+            aday._uak_krit_teyit = st.session_state.get("v_uak_docent_kriteri", False)
             st.session_state.son_aday = aday
             st.session_state.sonuc    = t.kriter_kontrol(aday)
             st.rerun()
@@ -1874,7 +1923,59 @@ son_aday = st.session_state.son_aday
 if sonuc is not None and son_aday is not None:
     st.divider()
 
-    pnlar = sonuc["puanlar"]
+    # Profesör için doçentlik sonrası puan özeti
+    if son_aday.kadro_turu == "profesor":
+        doc_son_faaliyetler = [f for f in son_aday.faaliyetler if f.docent_sonrasi]
+        if doc_son_faaliyetler:
+            from tnku_atama import puan_hesapla as _ph, AdayBilgi as _AB
+            _aday_doc = _AB(
+                ad_soyad=son_aday.ad_soyad,
+                alan=son_aday.alan,
+                kadro_turu="profesor",
+                faaliyetler=doc_son_faaliyetler,
+            )
+            _sonuc_doc = _ph(_aday_doc)
+            _p2_doc    = _sonuc_doc.get("puan2", 0)
+            _p1_doc    = _sonuc_doc.get("puan1", 0)
+            with st.expander(
+                f"📊 Doçentlik Sonrası Faaliyet Özeti "
+                f"({len(doc_son_faaliyetler)} faaliyet · "
+                f"P1: {_p1_doc:.1f} · P2: {_p2_doc:.1f})",
+                expanded=False
+            ):
+                st.caption(
+                    "Madde 11(b)-2 gereği profesörlük için doçentlik sonrası "
+                    "faaliyetleriniz ayrıca aşağıda listelenmiştir. "
+                    "Bu faaliyetlerin doçentlik alındığı dönemin ÜAK kriterlerini "
+                    "karşılaması gerekmektedir."
+                )
+                st.markdown(
+                    f"[🔗 ÜAK Doçentlik Başvuru Şartları Arşivi]"
+                    f"(https://www.uak.gov.tr/page/docentlik-basvuru-sartlari-kLPHX)"
+                )
+                _rows_doc = []
+                for _i, _f in enumerate(doc_son_faaliyetler):
+                    from tnku_atama import EK2_PUANLAR as _EK2, faaliyet_puan_hesapla as _fpuan
+                    _ad = _EK2.get(_f.kod, {}).get("ad","")[:50]
+                    _pp, _ = _fpuan(_f)
+                    _rows_doc.append({
+                        "#": _i+1, "Kod": _f.kod, "Faaliyet": _ad,
+                        "Adet": _f.adet,
+                        "Yazar": f"{_f.yazar_sirasi}/{_f.toplam_yazar}",
+                        "Q": _f.q_degeri or "",
+                        "Puan": round(_pp, 2),
+                    })
+                import pandas as _pd2
+                st.dataframe(_pd2.DataFrame(_rows_doc), use_container_width=True,
+                             hide_index=True)
+
+                _uak_teyit = st.session_state.get("v_uak_docent_kriteri", False)
+                if _uak_teyit:
+                    st.success("✅ ÜAK Madde 11(b)-2 kriteri teyit edilmiştir.")
+                else:
+                    st.warning("⚠️ ÜAK Madde 11(b)-2 kriteri henüz teyit edilmemiştir.")
+
+        pnlar = sonuc["puanlar"]
     genel = sonuc["genel_sonuc"]
 
     kadro_adi_tam = {
@@ -1885,17 +1986,27 @@ if sonuc is not None and son_aday is not None:
     }.get(son_aday.kadro_turu, "–")
 
     # ── Sonuç bandı ──────────────────────────────────────────────────────────
-    # 5 yıl kriteri
-    _p5ok  = st.session_state.get("_prof_5yil_ok", True)
-    _p5msg = st.session_state.get("_prof_5yil_mesaj", "")
-    if not _p5ok:
-        st.error(f"⛔ PROFESÖRLÜK BAŞVURUSU UYGUN DEĞİL: {_p5msg}")
+    # Ek kriterler (Profesörlük)
+    _p5ok   = st.session_state.get("_prof_5yil_ok", True)
+    _p5msg  = st.session_state.get("_prof_5yil_mesaj", "")
+    _uakok  = st.session_state.get("_uak_krit_ok", True)
+    _uakmsg = st.session_state.get("_uak_krit_mesaj", "")
 
-    ikon  = "✅" if (genel and _p5ok) else "❌"
+    if not _p5ok:
+        st.error(f"⛔ 5 YIL KRİTERİ: {_p5msg}")
+    if not _uakok:
+        st.warning(f"⚠️ ÜAK MADDESİ 11(b)-2: {_uakmsg}")
+        st.markdown(
+            "[🔗 ÜAK Doçentlik Başvuru Şartları Arşivi]"
+            "(https://www.uak.gov.tr/page/docentlik-basvuru-sartlari-kLPHX)"
+        )
+
+    _ek_ok = _p5ok and _uakok
+    ikon  = "✅" if (genel and _ek_ok) else "❌"
     gtxt  = ("TÜM KRİTERLER SAĞLANIYOR – BAŞVURU YAPILABİLİR"
-             if (genel and _p5ok) else
+             if (genel and _ek_ok) else
              "BAZI KRİTERLER SAĞLANMIYOR – BAŞVURU YAPILAMAZ")
-    cls   = "sonuc-ok" if (genel and _p5ok) else "sonuc-fail"
+    cls   = "sonuc-ok" if (genel and _ek_ok) else "sonuc-fail"
     st.markdown(f'<div class="{cls}">{ikon}  {gtxt}</div>',
                 unsafe_allow_html=True)
 
