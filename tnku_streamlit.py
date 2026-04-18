@@ -82,76 +82,78 @@ try:
         return None
 
     def _yazar_sirasi_bul(metin: str, isim: str):
-        """Künye metninden yazar listesini ve aranan kişinin sırasını bul."""
+        """Künye metninden yazar listesini ve aranan kişinin sırasını bul.
+        Ad/Soyad sırası ve Türkçe karakter farkı gözetilmez."""
         if not isim or not metin:
             return 1, 1, False
 
         BAG = {'a','an','the','in','of','and','or','for','with','by',
                've','ile','bir','bu','da','de','to','on','at','is','as',
-               'using','based','via','from','through','detection','classification',
-               'approach','method','analysis','deep','learning','neural','network'}
+               'using','based','via','from','through','detection',
+               'classification','approach','method','analysis',
+               'deep','learning','neural','network'}
 
         def _normalize_if_needed(m):
-            """Sadece hiç büyük harf yoksa title case'e çevir."""
+            """Hiç büyük harf yoksa title case'e çevir."""
             harfler = [c for c in m if c.isalpha()]
-            if not harfler:
-                return m
+            if not harfler: return m
             if sum(1 for c in harfler if c.isupper()) == 0:
                 parcalar = m.split(',')
                 yeni = []
                 for p in parcalar:
                     p = p.strip()
-                    kelimeler = [k[0].upper() + k[1:] if k else k for k in p.split()]
+                    kelimeler = [k[0].upper()+k[1:] if k else k for k in p.split()]
                     yeni.append(' '.join(kelimeler))
                 return ', '.join(yeni)
             return m
 
         def _yazar_mi(parca):
             p = parca.strip()
-            if not p or len(p) < 2:
-                return False
-            if p[0].isdigit():
-                return False
-            if ':' in p:
-                return False
+            if not p or len(p) < 2: return False
+            if p[0].isdigit(): return False
+            if ':' in p: return False
             kelimeler = p.split()
-            if len(kelimeler) > 4:
-                return False
-            if any(_re_aves.search(r'\d', k) for k in kelimeler):
-                return False
-            if any(k.lower() in BAG for k in kelimeler):
-                return False
-            if any(k[0].islower() for k in kelimeler if k):
-                return False
-            tam_buyuk = [k for k in kelimeler if k == k.upper() and len(k) > 1]
-            title_case = all(k[0].isupper() for k in kelimeler if k)
-            return len(tam_buyuk) >= 1 or title_case
+            if len(kelimeler) > 4: return False
+            if any(_re_aves.search(r'[0-9]', k) for k in kelimeler): return False
+            if any(k.lower() in BAG for k in kelimeler): return False
+            return all(k[0].isupper() for k in kelimeler if k)
 
         metin_n = _normalize_if_needed(metin)
         parcalar = [p.strip() for p in metin_n.split(',')]
         yazarlar = []
         for p in parcalar:
-            if _yazar_mi(p):
-                yazarlar.append(p)
-            else:
-                break
+            if _yazar_mi(p): yazarlar.append(p)
+            else: break
 
         if not yazarlar:
             return 1, 1, False
 
-        def _norm(s):
-            return _re_aves.sub(r'\s+', ' ', s.upper().strip())
+        # Türkçe karakterleri ASCII'ye çevir + büyük harf + sözcükleri sırala
+        # Böylece "Pınar CİHAN" = "CİHAN PINAR" = "pinar cihan" hepsi eşleşir
+        TR_MAP = str.maketrans(
+            'ıİğĞüÜşŞöÖçÇ',
+            'iIgGuUsSOoCc'
+        )
 
-        isim_norm  = _norm(isim)
+        def _norm_isim(s):
+            s2 = s.upper().translate(TR_MAP)
+            # Sözcükleri sıralayarak SOYAD AD / AD SOYAD farkını ortadan kaldır
+            return ' '.join(sorted(s2.split()))
+
+        isim_norm  = _norm_isim(isim)
         isim_parts = [p for p in isim_norm.split() if len(p) > 2]
 
         for si, yazar in enumerate(yazarlar, 1):
-            yazar_norm = _norm(yazar)
+            yazar_norm  = _norm_isim(yazar)
+            yazar_parts = yazar_norm.split()
+            # Tam eşleşme (sırasız)
             if isim_norm == yazar_norm:
                 return si, len(yazarlar), False
-            if sum(1 for p in isim_parts if p in yazar_norm) >= min(2, len(isim_parts)):
+            # Tüm parçalar yazarda var mı?
+            if isim_parts and all(p in yazar_parts for p in isim_parts):
                 return si, len(yazarlar), False
-            if len(isim_parts) == 1 and isim_parts[0] in yazar_norm:
+            # Tek parça (soyad yeterli)
+            if len(isim_parts) == 1 and isim_parts[0] in yazar_parts:
                 return si, len(yazarlar), False
 
         return 1, len(yazarlar), False
