@@ -17,6 +17,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 import tnku_atama as t
 
+
 # ── AVES Otomatik Yükleme ────────────────────────────────────────────────────
 try:
     import sys as _sys, os as _os, json as _json, hashlib as _hashlib, re as _re_aves
@@ -1001,3 +1002,1096 @@ def _bul_font(dosya: str) -> str | None:
     klasorler = [
         # Windows
         r"C:\Windows\Fonts",
+        r"C:\Windows\fonts",
+        # Linux – DejaVu (packages.txt: fonts-dejavu-core)
+        "/usr/share/fonts/truetype/dejavu",
+        "/usr/share/fonts/dejavu",
+        "/usr/share/fonts/truetype/ttf-dejavu",
+        # Linux – Liberation
+        "/usr/share/fonts/truetype/liberation",
+        "/usr/share/fonts/liberation",
+        # Linux – Ubuntu genel
+        "/usr/share/fonts/truetype",
+        "/usr/share/fonts",
+        # macOS
+        "/System/Library/Fonts",
+        "/Library/Fonts",
+        # Kullanıcı
+        os.path.expanduser("~/.fonts"),
+        os.path.expanduser("~/Library/Fonts"),
+        # Uygulamanın yanındaki fonts/ klasörü
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts"),
+    ]
+    for k in klasorler:
+        yol = os.path.join(k, dosya)
+        if os.path.exists(yol):
+            return yol
+    return None
+
+
+def _kaydet_font(isim: str, dosya: str) -> bool:
+    """Fontu kaydet; zaten kayıtlıysa sessizce geç."""
+    try:
+        pdfmetrics.getFont(isim)
+        return True          # zaten kayıtlı
+    except Exception:
+        pass
+    yol = _bul_font(dosya)
+    if not yol:
+        return False
+    try:
+        pdfmetrics.registerFont(TTFont(isim, yol))
+        return True
+    except Exception:
+        return False
+
+
+def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
+    buf = io.BytesIO()
+
+    # Normal + Bold çiftlerini dene; ilk başarılı çifti kullan
+    fr, fb = "Helvetica", "Helvetica-Bold"
+    for (fn, fin), (bn, bin_) in [
+        (("TRR_dv",  "DejaVuSans.ttf"),       ("TRB_dv",  "DejaVuSans-Bold.ttf")),
+        (("TRR_lib", "LiberationSans-Regular.ttf"), ("TRB_lib", "LiberationSans-Bold.ttf")),
+        (("TRR_ar",  "arial.ttf"),             ("TRB_ar",  "arialbd.ttf")),
+        (("TRR_AR",  "Arial.ttf"),             ("TRB_AR",  "ArialBold.ttf")),
+    ]:
+        if _kaydet_font(fn, fin):
+            fr = fn
+            if _kaydet_font(bn, bin_):
+                fb = bn
+            break
+
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        leftMargin=1.8 * cm, rightMargin=1.8 * cm,
+        topMargin=2 * cm,    bottomMargin=1.8 * cm,
+    )
+
+    def sty(name, sz=9, bold=False, **kw):
+        return ParagraphStyle(name, fontName=fb if bold else fr,
+                              fontSize=sz, leading=sz + 4, **kw)
+
+    s_title = sty("t", 14, True, textColor=colors.HexColor("#1A2B4A"),
+                  alignment=1, spaceAfter=3)
+    s_sub   = sty("s", 9, False, textColor=colors.HexColor("#2E5DA3"),
+                  alignment=1, spaceAfter=10)
+    s_sec   = sty("sc", 11, True, textColor=colors.HexColor("#2E5DA3"),
+                  spaceBefore=10, spaceAfter=4)
+    s_xs    = sty("xs", 8, False, textColor=colors.HexColor("#555555"))
+
+    def tbl_style(hdr_color=None):
+        hdr_color = hdr_color or colors.HexColor("#2E5DA3")
+        return TableStyle([
+            ("BACKGROUND",     (0, 0), (-1, 0),  hdr_color),
+            ("TEXTCOLOR",      (0, 0), (-1, 0),  colors.white),
+            ("FONTNAME",       (0, 0), (-1, 0),  fb),
+            ("FONTSIZE",       (0, 0), (-1, 0),  8),
+            ("TOPPADDING",     (0, 0), (-1, 0),  6),
+            ("BOTTOMPADDING",  (0, 0), (-1, 0),  6),
+            ("FONTNAME",       (0, 1), (-1, -1), fr),
+            ("FONTSIZE",       (0, 1), (-1, -1), 8),
+            ("TOPPADDING",     (0, 1), (-1, -1), 3),
+            ("BOTTOMPADDING",  (0, 1), (-1, -1), 3),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+             [colors.white, colors.HexColor("#F4F7FF")]),
+            ("GRID",           (0, 0), (-1, -1), 0.3, colors.HexColor("#CCCCCC")),
+            ("VALIGN",         (0, 0), (-1, -1), "MIDDLE"),
+        ])
+
+    kadro_adi = {
+        "dr_ilk":     "Dr. Ogretim Uyesi - Ilk Atanma",
+        "dr_yeniden": f"Dr. Ogretim Uyesi - Yeniden Atanma ({aday.yeniden_sure} Yil)",
+        "docent":     "Docent",
+        "profesor":   "Profesor",
+    }.get(aday.kadro_turu, "-")
+
+    pnlar = sonuc["puanlar"]
+    genel = sonuc["genel_sonuc"]
+    W, _H = A4
+
+    elems = []
+    elems.append(Paragraph("TEKIRDAG NAMIK KEMAL UNIVERSITESI", s_title))
+    elems.append(Paragraph("Ogretim Uyeligi - Atama Puanlama Raporu", s_sub))
+    elems.append(Paragraph("EYS-YNG-129  |  28.03.2025", s_xs))
+    elems.append(HRFlowable(width="100%", thickness=2,
+                             color=colors.HexColor("#2E5DA3")))
+    elems.append(Spacer(1, 8))
+
+    ad_data = [
+        ["Aday", "Alan", "Kadro", "Tarih"],
+        [aday.ad_soyad, aday.alan, kadro_adi,
+         datetime.date.today().strftime("%d.%m.%Y")],
+    ]
+    at = Table(ad_data, colWidths=[3.5*cm, 3.5*cm, 8*cm, 2.5*cm])
+    at.setStyle(tbl_style())
+    elems.append(at)
+    elems.append(Spacer(1, 10))
+
+    # 5 yıl kriteri kontrolü
+    import datetime as _dt_pdf
+    _p5ok_pdf = True
+    _p5msg_pdf = ""
+    _uak_pdf = True
+    _uak_pdf_msg = ""
+    if hasattr(aday, "_docent_yil") and aday._docent_yil and aday.kadro_turu == "profesor":
+        _gecen_pdf = _dt_pdf.date.today().year - aday._docent_yil
+        if _gecen_pdf < 5:
+            _p5ok_pdf = False
+            _p5msg_pdf = f"Docent unvanindan bu yana {_gecen_pdf} yil gecmistir (en az 5 yil gereklidir)."
+        if not getattr(aday, "_uak_krit_teyit", False):
+            _uak_pdf = False
+            _uak_pdf_msg = (
+                f"Madde 11(b)-2: {aday._docent_yil} donemi UAK docentlik kriterleri "
+                f"docentlik sonrasi calismalarda yeniden saglandigina dair teyit eksik."
+            )
+
+    _ek_ok_pdf = _p5ok_pdf and _uak_pdf
+    gtxt = ("TUM KRITERLER SAGLANIYOR - BASVURU YAPILABILIR"
+            if (genel and _ek_ok_pdf) else
+            "BAZI KRITERLER SAGLANMIYOR - BASVURU YAPILAMAZ")
+    gc = colors.HexColor("#1A7A3A") if genel else colors.HexColor("#C0392B")
+    gt = Table([[gtxt]], colWidths=[W - 3.6*cm])
+    gt.setStyle(TableStyle([
+        ("BACKGROUND",    (0,0), (-1,-1), gc),
+        ("TEXTCOLOR",     (0,0), (-1,-1), colors.white),
+        ("FONTNAME",      (0,0), (-1,-1), fb),
+        ("FONTSIZE",      (0,0), (-1,-1), 11),
+        ("ALIGN",         (0,0), (-1,-1), "CENTER"),
+        ("TOPPADDING",    (0,0), (-1,-1), 10),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 10),
+    ]))
+    elems.append(gt)
+    for _uyari_msg in [
+        _p5msg_pdf if not _p5ok_pdf else "",
+        _uak_pdf_msg if not _uak_pdf else "",
+    ]:
+        if _uyari_msg:
+            elems.append(Spacer(1, 4))
+            elems.append(Paragraph(
+                f"UYARI: {_uyari_msg}",
+                ParagraphStyle("puyari", fontName=fb, fontSize=9, leading=12,
+                               textColor=colors.HexColor("#C0392B"),
+                               backColor=colors.HexColor("#FFEBEE"),
+                               borderPadding=6)))
+    elems.append(Spacer(1, 10))
+
+    elems.append(Paragraph("PUAN OZETI", s_sec))
+    pdata = [
+        ["Puan Turu", "Deger"],
+        ["PUAN-1  (EK-2 bolum 1-6 kapsami)", f"{pnlar['puan1']:.2f}"],
+        ["PUAN-2  (EK-2 tamami - kalan)",     f"{pnlar['puan2']:.2f}"],
+        ["TOPLAM PUAN",                       f"{pnlar['toplam']:.2f}"],
+    ]
+    pts = tbl_style()
+    pts.add("FONTNAME",   (0, 3), (-1, 3), fb)
+    pts.add("FONTSIZE",   (0, 3), (-1, 3), 10)
+    pts.add("BACKGROUND", (0, 3), (-1, 3), colors.HexColor("#D6E4F7"))
+    pt = Table(pdata, colWidths=[13*cm, 4.5*cm])
+    pt.setStyle(pts)
+    elems.append(pt)
+    elems.append(Spacer(1, 10))
+
+    elems.append(Paragraph("KRITER KONTROL SONUCLARI", s_sec))
+    kdata = [["#", "Kriter", "Durum", "Not"]]
+    for i, kr in enumerate(sonuc["kriterler"], 1):
+        ok = "✓" in kr["durum"]
+        kdata.append([
+            str(i), kr["kriter"],
+            "SAGLANIYOR" if ok else "SAGLANMIYOR",
+            kr["notlar"],
+        ])
+    kts = tbl_style()
+    for ri, kr in enumerate(sonuc["kriterler"], 1):
+        ok   = "✓" in kr["durum"]
+        info = "(f) Bilgi:" in kr["kriter"]
+        bg = (colors.HexColor("#FFF8E1") if info else
+              colors.HexColor("#E8F5E9") if ok else
+              colors.HexColor("#FFEBEE"))
+        tc = (colors.HexColor("#F57F17") if info else
+              colors.HexColor("#1A7A3A") if ok else
+              colors.HexColor("#C0392B"))
+        kts.add("BACKGROUND", (0, ri), (-1, ri), bg)
+        kts.add("TEXTCOLOR",  (2, ri), (2, ri),  tc)
+        kts.add("FONTNAME",   (2, ri), (2, ri),  fb)
+    kt = Table(kdata, colWidths=[0.7*cm, 9.5*cm, 3*cm, 4.3*cm])
+    kt.setStyle(kts)
+    elems.append(kt)
+    elems.append(Spacer(1, 10))
+
+    elems.append(Paragraph("FAALIYET DETAYI", s_sec))
+
+    # Faaliyet listesinden künye haritası oluştur (kod → künye)
+    # aday.faaliyetler ile pnlar["detaylar"] aynı sırada
+    faaliyet_kunye = []
+    for f in aday.faaliyetler:
+        faaliyet_kunye.append(getattr(f, "_kunye", "") or "")
+
+    fdata = [["#", "Kod", "Faaliyet", "Adet", "Puan", "Tür"]]
+    for ri, d in enumerate(pnlar["detaylar"]):
+        fdata.append([
+            str(ri + 1),
+            d["kod"],
+            d["ad"][:60],
+            str(d["adet"]),
+            f"{d['puan']:.2f}",
+            "P-1" if d["puan1_mi"] else "P-2",
+        ])
+    fts = tbl_style()
+    for ri, d in enumerate(pnlar["detaylar"], 1):
+        fts.add("BACKGROUND", (0, ri), (-1, ri),
+                colors.HexColor("#EAF4E8") if d["puan1_mi"]
+                else colors.HexColor("#EAF0FA"))
+    ft = Table(fdata, colWidths=[0.7*cm, 1.2*cm, 9.5*cm, 0.9*cm, 1.4*cm, 1.2*cm])
+    ft.setStyle(fts)
+    elems.append(ft)
+    elems.append(Spacer(1, 10))
+
+    # Künye listesi - yapısal, sarma destekli
+    import re as _re_pdf
+
+    def _kunye_parcala(k):
+        parcalar = [p.strip() for p in k.split(',')]
+        BAG = {'a','an','the','in','of','and','or','for','with','by','ve','ile'}
+        def _yz(p):
+            kel = p.split()
+            if not kel or len(kel) > 4: return False
+            if ':' in p: return False
+            if any(_re_pdf.search(r'[0-9]', x) for x in kel): return False
+            if any(x.lower() in BAG for x in kel): return False
+            return all(x[0].isupper() for x in kel if x)
+        yazarlar = []; yb = 0
+        for i, p in enumerate(parcalar):
+            if _yz(p): yazarlar.append(p); yb = i+1
+            else: break
+        kalan = parcalar[yb:]
+        vi = len(kalan)
+        for i, p in enumerate(kalan):
+            if _re_pdf.match(r'^(vol|volume|cilt|say|no\b|pp\b|page|\d{4}$|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|oca|sub|nis|haz|tem|agu|eyl|eki|kas|ara)', p.lower().strip()):
+                vi = i; break
+        orta = kalan[:vi]
+        baslik = orta[0] if orta else ""
+        dergi  = ', '.join(orta[1:]) if len(orta) > 1 else ""
+        vol_pp_yil = kalan[vi:]
+        yil = next((_re_pdf.search(r'\b(20\d{2}|19\d{2})\b', p).group(1)
+                    for p in vol_pp_yil if _re_pdf.search(r'\b(20\d{2}|19\d{2})\b', p)), "")
+        vol_pp = ', '.join(p for p in vol_pp_yil
+                           if not _re_pdf.match(r'^\d{4}[.,]?$', p.strip()))
+        return {"yazarlar": yazarlar, "baslik": baslik.strip(),
+                "dergi": dergi.strip(), "vol_pp": vol_pp.strip(), "yil": yil}
+
+    s_kh = ParagraphStyle("kh", fontName=fb, fontSize=8.5, leading=11,
+                           textColor=colors.HexColor("#1A2B4A"), spaceBefore=10, spaceAfter=1)
+    s_ks = ParagraphStyle("ks", fontName=fr, fontSize=8, leading=10,
+                           leftIndent=12, spaceAfter=1, textColor=colors.HexColor("#333333"))
+    s_kb = ParagraphStyle("kb", fontName=fr, fontSize=8, leading=10,
+                           leftIndent=12, spaceAfter=3, textColor=colors.HexColor("#2E5DA3"))
+
+    kunye_listesi = [(i+1, k) for i, k in enumerate(faaliyet_kunye) if k.strip()]
+    if kunye_listesi:
+        elems.append(Paragraph("KUNYE LISTESI", s_sec))
+        for no, k in kunye_listesi:
+            f_idx = no - 1
+            fo = aday.faaliyetler[f_idx] if f_idx < len(aday.faaliyetler) else None
+            p  = _kunye_parcala(k)
+            # --- Başlık satırı ---
+            elems.append(Paragraph(f"<b>#{no}</b>  {fo.kod if fo else ''}", s_kh))
+            # --- Yazarlar ---
+            if p["yazarlar"]:
+                yz_txt = ", ".join(p["yazarlar"])
+                if fo and fo.toplam_yazar > 0:
+                    yz_bilgi = f"({fo.yazar_sirasi}/{fo.toplam_yazar}. yazar"
+                    if fo.sorumlu_veya_senyör: yz_bilgi += " - Sorumlu"
+                    yz_bilgi += ")"
+                    yz_txt += "  " + yz_bilgi
+                elems.append(Paragraph("Yazarlar: " + yz_txt, s_ks))
+            # --- Başlık ---
+            if p["baslik"]:
+                elems.append(Paragraph("Baslik: " + p["baslik"], s_ks))
+            # --- Dergi / Cilt / Sayfa / Yıl / Q ---
+            dergi_parts = []
+            if p["dergi"]:  dergi_parts.append(p["dergi"])
+            if p["vol_pp"]: dergi_parts.append(p["vol_pp"])
+            if p["yil"]:    dergi_parts.append(p["yil"])
+            if fo and fo.q_degeri: dergi_parts.append("[" + fo.q_degeri + "]")
+            if fo and fo.docent_sonrasi: dergi_parts.append("[Docent Sonrasi]")
+            if dergi_parts:
+                elems.append(Paragraph(", ".join(dergi_parts), s_kb))
+        elems.append(Spacer(1, 10))
+    else:
+        elems.append(Spacer(1, 14))
+
+    elems.append(HRFlowable(width="100%", thickness=0.4,
+                             color=colors.HexColor("#AAAAAA")))
+    elems.append(Spacer(1, 4))
+    elems.append(Paragraph(
+        "Bu rapor TNKU EYS-YNG-129 yonergesi kapsaminda otomatik olarak "
+        "olusturulmustur. Resmi basvurularda ilgili birime danisiniz.", s_xs))
+
+    doc.build(elems)
+    buf.seek(0)
+    return buf.read()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Başlık
+# ─────────────────────────────────────────────────────────────────────────────
+st.markdown("""
+<div class="header-bar">
+  <h2>🎓&nbsp; TNKÜ &nbsp;·&nbsp; Öğretim Üyeliği Atama Puanlama Sistemi</h2>
+  <small>EYS-YNG-129 &nbsp;·&nbsp; 28.03.2025 &nbsp;·&nbsp;
+  Tekirdağ Namık Kemal Üniversitesi</small>
+</div>
+""", unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sekmeler
+# ─────────────────────────────────────────────────────────────────────────────
+tab1, tab2 = st.tabs([
+    "📋  Aday Bilgileri",
+    "➕  Faaliyetler",
+])
+
+# ═══════════════════════════════════════ TAB 1 – ADAY BİLGİLERİ ══════════════
+with tab1:
+
+    # ── 1. Ad Soyad + AVES URL ───────────────────────────────────────────────
+    st.markdown('<div class="card-title">KİMLİK BİLGİLERİ</div>',
+                unsafe_allow_html=True)
+    ki1, ki2 = st.columns(2, gap="medium")
+    with ki1:
+        st.text_input("Ad Soyad", key="v_ad", placeholder="Adınız Soyadınız")
+    with ki2:
+        st.text_input(
+            "AVES CV URL",
+            key="v_aves_url",
+            placeholder="asaygili.cv.nku.edu.tr",
+            help="AVES profil adresiniz. Faaliyetleri otomatik yüklemek için kullanılır."
+        )
+
+    st.divider()
+
+    # ── 2. Akademik Alan + Kadro Türü ────────────────────────────────────────
+    col_kimlik, col_kadro = st.columns([1, 1], gap="large")
+
+    with col_kimlik:
+        st.markdown('<div class="card-title">AKADEMİK ALAN</div>',
+                    unsafe_allow_html=True)
+        st.selectbox("Akademik Alan", key="v_alan", options=[
+            "ALAN-1  –  Fen / Sağlık / Müh. / Matematik vb.",
+            "ALAN-2  –  Sosyal / İdari / Eğitim / Güzel Sanatlar vb.",
+        ])
+        st.checkbox("Güzel Sanatlar alanı  (PUAN-1 için %50 yeterli)",
+                    key="v_guzel")
+
+    with col_kadro:
+        st.markdown('<div class="card-title">KADRO TÜRÜ</div>',
+                    unsafe_allow_html=True)
+        st.radio(
+            "Başvuru yapılan kadro",
+            key="v_kadro",
+            options=["dr_ilk", "dr_yeniden", "docent", "profesor"],
+            format_func=lambda x: KADRO_ADI[x],
+        )
+        if st.session_state.get("v_kadro") == "dr_yeniden":
+            st.selectbox("Yeniden Atama Süresi", key="v_sure",
+                         options=[3, 2, 1],
+                         format_func=lambda x: f"{x} Yıl")
+        if st.session_state.get("v_kadro") == "profesor":
+            st.number_input(
+                "Doçentlik Yılı",
+                min_value=1970, max_value=2030,
+                value=st.session_state.get("v_docent_yil", 2020),
+                step=1, key="v_docent_yil",
+                help="Doçentlik unvanını aldığınız yıl. Yayın yılı bu yıldan "
+                     "sonraysa 'Doçentlik Sonrası' otomatik işaretlenir."
+            )
+            # ÜAK doçentlik kriteri teyidi
+            _doc_yil_v = int(st.session_state.get("v_docent_yil", 0) or 0)
+            if _doc_yil_v > 0:
+                # Doçentlik dönemini tahmin et (Mart veya Ekim)
+                _doc_donem = f"{_doc_yil_v} dönemi"
+                st.info(
+                    f"📋 **Madde 11(b)-2 Kriteri:**  "
+                    f"Doçentlik unvanını aldığınız dönemdeki ({_doc_donem}) "
+                    f"ÜAK başvuru kriterlerini **doçentlik sonrası** "
+                    f"çalışmalarınızla yeniden sağlamış olmanız gerekir "
+                    f"(tezden üretilen yayın şartı hariç).",
+                    icon="ℹ️"
+                )
+                st.markdown(
+                    f"[🔗 ÜAK Doçentlik Başvuru Şartları Arşivi]"
+                    f"(https://www.uak.gov.tr/page/docentlik-basvuru-sartlari-kLPHX)",
+                )
+                st.checkbox(
+                    f"✅ {_doc_yil_v} dönemindeki ÜAK doçentlik kriterlerini "
+                    f"doçentlik sonrası çalışmalarımla yeniden sağladığımı teyit ediyorum "
+                    f"(tezden üretilen yayın hariç).",
+                    key="v_uak_docent_kriteri",
+                    help="Madde 11(b)-2 gereği profesörlük başvurusu için zorunludur."
+                )
+
+    st.divider()
+
+    # ── 3. Genel Koşullar ────────────────────────────────────────────────────
+    st.markdown('<div class="card-title">GENEL KOŞULLAR</div>',
+                unsafe_allow_html=True)
+
+    gc1, gc2, gc3 = st.columns(3, gap="medium")
+    with gc1:
+        st.checkbox("Doktora / Uzmanlık / Yeterlilik", key="v_doktora",
+                    help="Tıp uzm., Diş Hek. uzm., Eczacılık uzm. veya Güzel Sanatlar yeterlilik belgesi")
+        st.checkbox("ÜAK Doçent unvanı", key="v_uak",
+                    help="Üniversitelerarası Kuruldan alınmış doçentlik unvanı")
+    with gc2:
+        st.checkbox("ÜAK sözlü sınavı başarılı", key="v_sifahi",
+                    help="Doçent için zorunlu · Profesör'de işaretlenmezse puan eşikleri %80'e düşer")
+        st.checkbox("Örnek ders 'Başarılı'", key="v_ornek",
+                    help="Dr. Öğr. Üyesi için zorunlu; sözlü sınavsız Profesör için de zorunlu")
+    with gc3:
+        st.checkbox("Başlıca Araştırma Eseri eklendi", key="v_baslica",
+                    help="Prof. başvurusu için zorunlu; doçent sonrası, başlıca yazar")
+        st.checkbox("Çalışma alanı yabancı dil bölümü", key="v_ydbol",
+                    help="Bu durumda YÖKDİL/YDS puanı ≥85 aranır")
+
+    st.divider()
+
+    # ── 4. Sayısal Bilgiler ──────────────────────────────────────────────────
+    st.markdown('<div class="card-title">SAYISAL BİLGİLER</div>',
+                unsafe_allow_html=True)
+    dl1, dl2, dl3 = st.columns(3, gap="medium")
+    with dl1:
+        st.number_input("YÖKDİL / YDS Puanı", key="v_ydpuan",
+                        min_value=0.0, max_value=100.0, step=0.5,
+                        help="Dr. Öğr. Üyesi ≥60  |  Doçent/Prof. ≥65  |  Yab. Dil Böl. ≥85")
+    with dl2:
+        st.number_input("Farklı yarıyıl ders sayısı", key="v_ders",
+                        min_value=0, max_value=60, step=1,
+                        help="Doçent ve Prof. için ≥4 farklı yarıyıl gerekli")
+    with dl3:
+        st.number_input("Doçent sonrası yükseköğretim süresi (yıl)", key="v_docsure",
+                        min_value=0.0, max_value=40.0, step=0.5,
+                        help="Prof. için ≥2.5 yıl yükseköğretim, ≥5 yıl doçentlik gerekli")
+        # Doçentlik yılına göre otomatik hesap
+        if st.session_state.get("v_kadro") == "profesor":
+            _doc_yil = int(st.session_state.get("v_docent_yil", 0) or 0)
+            if _doc_yil > 0:
+                import datetime as _dt
+                _gecen = _dt.date.today().year - _doc_yil
+                if _gecen < 5:
+                    st.warning(
+                        f"⚠️ Doçentlik üzerinden {_gecen} yıl geçmiş. "
+                        f"Profesör başvurusu için en az **5 yıl** geçmesi gerekir."
+                    )
+                else:
+                    st.success(f"✅ Doçentlik üzerinden {_gecen} yıl geçmiş.")
+
+    st.divider()
+
+    # ── 5. AVES Otomatik Yükle ───────────────────────────────────────────────
+    st.markdown('<div class="card-title">AVES VERİSİNDEN OTOMATİK YÜKLE</div>',
+                unsafe_allow_html=True)
+    st.caption(
+        "Yukarıda girdiğiniz AVES URL'si kullanılır. "
+        "Yayınlar, bildiriler, projeler ve patentler otomatik yüklenir."
+    )
+
+    aves_url_v  = st.session_state.get("v_aves_url", "")
+    aves_isim_v = st.session_state.get("v_ad", "")
+
+    ba1, ba2, ba3 = st.columns([2, 2, 1])
+    with ba1:
+        if st.button("⚡ Yükle ve Ekle", type="primary",
+                     use_container_width=True,
+                     help="AVES verisini otomatik çekip listeye ekler"):
+            url  = (aves_url_v or "").strip()
+            isim = (aves_isim_v or "").strip()
+            if not url:
+                st.error("Önce AVES CV URL'sini girin.")
+            else:
+                with st.spinner("AVES verisi yükleniyor..."):
+                    try:
+                        yeni = aves_faaliyete_donustur(url, isim)
+                        if not AVES_OK:
+                            st.error("requests veya bs4 eksik: pip install requests beautifulsoup4")
+                    except Exception as _ex:
+                        st.error(f"Hata: {_ex}")
+                        if _aves_son_hata[0]:
+                            st.error(f"Detay: {_aves_son_hata[0]}")
+                        yeni = []
+                if yeni:
+                    st.session_state.faaliyetler.extend(yeni)
+                    st.success(f"✅ {len(yeni)} faaliyet eklendi!")
+                    st.rerun()
+                else:
+                    st.warning(
+                        f"AVES'ten veri çekilemedi. "
+                        "URL formatı: asaygili.cv.nku.edu.tr"
+                    )
+    with ba2:
+        if st.button("🗑 Otomatik Verileri Temizle",
+                     use_container_width=True):
+            onceki = len(st.session_state.faaliyetler)
+            st.session_state.faaliyetler = []
+            st.info(f"{onceki} faaliyet temizlendi.")
+            st.rerun()
+    with ba3:
+        if st.button("🔍 Bağlantı Test Et", use_container_width=True):
+            url_t = (aves_url_v or "").strip()
+            if url_t:
+                base_t = url_t.rstrip("/")
+                if not base_t.startswith("http"):
+                    base_t = "http://" + base_t
+                try:
+                    import requests as _rtest
+                    r_t = _rtest.get(base_t + "/", timeout=8)
+                    st.success(f"✅ Status: {r_t.status_code}")
+                except Exception as _et:
+                    st.error(f"❌ {_et}")
+            else:
+                st.warning("AVES URL boş")
+# ═══════════════════════════════════════ TAB 2 – FAALİYETLER ════════════════
+with tab2:
+    left_col, right_col = st.columns([1, 3], gap="large")
+
+    with left_col:
+        st.markdown('<div class="card-title">KATEGORİ</div>',
+                    unsafe_allow_html=True)
+        grup_no: int = st.radio(
+            "Kategori",
+            options=list(GRUPLAR.keys()),
+            format_func=lambda x: f"{x:>2}. {GRUPLAR[x]}",
+            key="v_grup",
+            label_visibility="collapsed",
+        )
+
+    with right_col:
+        st.markdown(
+            f'<div class="card-title">FAAALİYET EKLE &nbsp;—&nbsp; {GRUPLAR[grup_no]}</div>',
+            unsafe_allow_html=True,
+        )
+
+        ilgili = sorted(
+            [(k, v) for k, v in t.EK2_PUANLAR.items() if v["grup"] == grup_no],
+            key=lambda x: [int(s) if s.isdigit() else s
+                           for s in x[0].replace(".", " ").split()],
+        )
+
+        if not ilgili:
+            st.info("Bu kategoride kayıtlı faaliyet bulunamadı.")
+        else:
+            faaliyet_options = {
+                f"{k}  –  {v['ad']}  [{v['taban']} puan]": k
+                for k, v in ilgili
+            }
+            secili_label: str = st.selectbox(
+                "Faaliyet", options=list(faaliyet_options.keys()), key="v_fkod",
+            )
+            secili_kod = faaliyet_options[secili_label]
+            bilgi      = t.EK2_PUANLAR[secili_kod]
+
+            adet_label = "Yıl" if grup_no == 18 else "Adet"
+            adet: int  = st.number_input(adet_label, min_value=1,
+                                         max_value=999, value=1, key="v_adet")
+
+            toplam_yazar, yazar_sirasi, sorumlu = 1, 1, False
+            if grup_no in {1, 2, 3}:
+                yc1, yc2, yc3 = st.columns(3)
+                with yc1:
+                    toplam_yazar = st.number_input("Toplam Yazar", min_value=1,
+                                                   max_value=50, value=1, key="v_tyazar")
+                with yc2:
+                    yazar_sirasi = st.number_input("Yazar Sırası", min_value=1,
+                                                   max_value=50, value=1, key="v_syazar")
+                with yc3:
+                    sorumlu = st.checkbox("Sorumlu / Senyör", key="v_sorumlu")
+
+            q_val: str | None = None
+            if bilgi.get("q_carpan"):
+                q_val = st.radio("Dergi Kuartili (Q)",
+                                 options=["Q1", "Q2", "Q3", "Q4"],
+                                 horizontal=True, key="v_q",
+                                 help="Q1→x2  |  Q2→x1.5  |  Q3→x1.25  |  Q4→x1")
+
+            patent_durum: str | None = None
+            if secili_kod in ("11.1", "11.7"):
+                patent_durum = PATENT_MAP[st.radio(
+                    "Patent Durumu", options=list(PATENT_MAP.keys()),
+                    horizontal=True, key="v_patent")]
+
+            ex1, ex2 = st.columns(2)
+            ikinci_dan = False
+            with ex1:
+                if secili_kod in ("17.1", "17.2"):
+                    ikinci_dan = st.checkbox("İkinci Danışman (yarı puan)",
+                                             key="v_ikinci")
+            with ex2:
+                docsn: bool = st.checkbox("Doçentlik Sonrası Faaliyet",
+                                          key="v_docsn")
+
+            kunye_giris = st.text_area(
+                "📄 Künye (isteğe bağlı)",
+                key="v_kunye",
+                placeholder="Yazar(lar), Başlık, Dergi/Yayınevi, Yıl, Cilt, Sayfa...",
+                height=68,
+                help="Yayının tam künyesini girin. Düzenleme ve kontrol için kullanılır."
+            )
+
+            f_tmp = t.Faaliyet(
+                kod=secili_kod, adet=adet,
+                toplam_yazar=toplam_yazar, yazar_sirasi=yazar_sirasi,
+                sorumlu_veya_senyör=sorumlu, q_degeri=q_val,
+                patent_durum=patent_durum,
+                ikinci_danisман=ikinci_dan, docent_sonrasi=docsn,
+            )
+            p_tmp, _ = t.faaliyet_puan_hesapla(f_tmp)
+            p1_mi    = t.is_puan1(secili_kod,
+                                  st.session_state.get("v_kadro", "dr_ilk"))
+            tur_str  = "PUAN-1" if p1_mi else "PUAN-2"
+            tur_renk = "#1A7A3A" if p1_mi else "#2E5DA3"
+
+            ic1, ic2 = st.columns([3, 1])
+            with ic1:
+                st.markdown(
+                    f"<div style='background:#F8FAFF;border:1px solid #DBEAFE;"
+                    f"border-radius:8px;padding:10px 14px;font-size:0.9em;'>"
+                    f"Tahmini puan: <b style='font-size:1.1em'>{p_tmp:.2f}</b>"
+                    f"&nbsp;&nbsp;·&nbsp;&nbsp;"
+                    f"<span style='color:{tur_renk};font-weight:600'>{tur_str}</span>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+            with ic2:
+                if st.button("➕  Ekle", type="primary",
+                             use_container_width=True):
+                    _f_yeni = t.Faaliyet(
+                        kod=secili_kod, adet=adet,
+                        toplam_yazar=toplam_yazar, yazar_sirasi=yazar_sirasi,
+                        sorumlu_veya_senyör=sorumlu, q_degeri=q_val,
+                        patent_durum=patent_durum,
+                        ikinci_danisман=ikinci_dan, docent_sonrasi=docsn,
+                    )
+                    _f_yeni._kunye = (kunye_giris or "").strip()
+                    st.session_state.faaliyetler.append(_f_yeni)
+                    st.rerun()
+
+    # ── Eklenen Faaliyetler ──────────────────────────────────────────────────
+    st.divider()
+    flist    = st.session_state.faaliyetler
+    ham_top  = sum(t.faaliyet_puan_hesapla(f)[0] for f in flist)
+    kadro_su = st.session_state.get("v_kadro", "dr_ilk")
+
+    tbl_h1, tbl_h2 = st.columns([4, 1])
+    with tbl_h1:
+        st.markdown(
+            f'<div class="card-title">EKLENMİŞ FAALİYETLER'
+            f'&nbsp;<span style="background:#2E5DA3;color:white;padding:2px 10px;'
+            f'border-radius:12px;font-size:0.9em">{len(flist)}</span></div>',
+            unsafe_allow_html=True,
+        )
+    with tbl_h2:
+        st.metric("Ham Toplam", f"{ham_top:.2f}")
+
+    if flist:
+        rows = _faaliyet_satirlari(kadro_su)
+        df   = pd.DataFrame(rows)  # # sütunu tabloda görünür kalır
+
+        # Satır seçimi: on_select ile tıklama → düzenleme formuna aktarır
+        try:
+            tablo_sec = st.dataframe(
+                df.style.map(_tur_renk, subset=["Tur"]),
+                use_container_width=True,
+                height=min(420, 50 + 36 * len(rows)),
+                on_select="rerun",
+                selection_mode="single-row",
+                key="v_tablo_sec",
+            )
+            # Seçilen satırı al
+            secili_satirlar = tablo_sec.selection.rows if tablo_sec.selection else []
+            if secili_satirlar:
+                otomatik_idx = secili_satirlar[0]
+                if st.session_state.get("_tablo_onceki_sec") != otomatik_idx:
+                    st.session_state["_duzenle_idx"] = otomatik_idx
+                    st.session_state["_duzenle_ac"]  = True
+                    st.session_state["_tablo_onceki_sec"] = otomatik_idx
+        except Exception:
+            # Eski Streamlit sürümü - on_select desteklenmiyor
+            st.dataframe(
+                df.style.map(_tur_renk, subset=["Tur"]),
+                use_container_width=True,
+                height=min(420, 50 + 36 * len(rows)),
+            )
+
+
+        # ── Seçim + Düzenleme ───────────────────────────────────────────
+        # Sil butonları
+        sil_col1, sil_col2 = st.columns([1, 3])
+        with sil_col1:
+            if st.button("🗑 Tümünü Temizle"):
+                st.session_state.faaliyetler = []
+                st.rerun()
+
+        st.divider()
+
+        # Her faaliyet için expander: tek tıkla açılır, içinde form
+        for didx, f_d in enumerate(st.session_state.faaliyetler):
+            bilgi_d    = t.EK2_PUANLAR.get(f_d.kod, {})
+            bilgi_d_ad = bilgi_d.get("ad", "")
+            kunye_d    = getattr(f_d, "_kunye", "") or ""
+            p_f, _     = t.faaliyet_puan_hesapla(f_d)
+            ozet = kunye_d[:60] if kunye_d else bilgi_d_ad[:60]
+
+            with st.expander(
+                f"**#{didx+1}** · `{f_d.kod}` · {ozet}… "
+                f"  ➤ *{p_f:.2f} puan*",
+                expanded=False,
+            ):
+                # Künye
+                yeni_kunye = st.text_area(
+                    "📄 Künye",
+                    value=kunye_d,
+                    height=68,
+                    key=f"kny_{didx}",
+                    placeholder="Yazar(lar), Başlık, Dergi/Yayınevi, Yıl...",
+                )
+
+                dc1, dc2, dc3 = st.columns([2, 1, 1])
+                with dc1:
+                    kod_list = list(t.EK2_PUANLAR.keys())
+                    yeni_kod = st.selectbox(
+                        "EK-2 Kodu",
+                        options=kod_list,
+                        index=kod_list.index(f_d.kod) if f_d.kod in kod_list else 0,
+                        format_func=lambda k: f"{k} – {t.EK2_PUANLAR[k]['ad'][:50]}",
+                        key=f"kod_{didx}",
+                    )
+                with dc2:
+                    yeni_adet = st.number_input(
+                        "Adet", min_value=1, value=f_d.adet, key=f"adt_{didx}")
+                with dc3:
+                    if yeni_kod in ("1.1", "1.3", "4.1"):
+                        yeni_q = st.selectbox(
+                            "Q Değeri",
+                            options=["", "Q1", "Q2", "Q3", "Q4"],
+                            index=["", "Q1", "Q2", "Q3", "Q4"].index(f_d.q_degeri or ""),
+                            key=f"q_{didx}",
+                        )
+                    else:
+                        yeni_q = None
+                        st.caption("Q: bu kod için geçersiz")
+
+                dd1, dd2, dd3 = st.columns([1, 1, 2])
+                with dd1:
+                    yeni_tyz = st.number_input(
+                        "Toplam Yazar", min_value=1,
+                        value=f_d.toplam_yazar, key=f"tyz_{didx}")
+                with dd2:
+                    yeni_sira = st.number_input(
+                        "Yazar Sırası", min_value=1,
+                        value=f_d.yazar_sirasi, key=f"sra_{didx}")
+                with dd3:
+                    yeni_sor = st.checkbox(
+                        "Sorumlu/Senyör Yazar",
+                        value=f_d.sorumlu_veya_senyör, key=f"sor_{didx}")
+
+                # Doçentlik Sonrası - sadece profesör başvurusunda
+                _kadro_sec = st.session_state.get("v_kadro","")
+                yeni_docsn = f_d.docent_sonrasi
+                if _kadro_sec == "profesor":
+                    _doc_yil = int(st.session_state.get("v_docent_yil", 0) or 0)
+                    _yayin_y = _yayin_yili_bul(getattr(f_d, "_kunye", "") or "")
+                    _auto    = (_yayin_y > _doc_yil) if (_doc_yil > 0 and _yayin_y > 0) else f_d.docent_sonrasi
+                    yeni_docsn = st.checkbox(
+                        f"Doçentlik Sonrası Faaliyet"
+                        + (f" (yayın yılı: {_yayin_y})" if _yayin_y else ""),
+                        value=_auto, key=f"dcsn_{didx}")
+
+                yeni_pd = f_d.patent_durum
+                if yeni_kod in ("11.1", "11.7"):
+                    yeni_pd = st.radio(
+                        "Patent Durumu",
+                        options=["tescilli", "arastirma_raporu", "basvuru"],
+                        index=["tescilli","arastirma_raporu","basvuru"].index(
+                            f_d.patent_durum or "tescilli"),
+                        horizontal=True, key=f"pd_{didx}")
+
+                btn1, btn2 = st.columns(2)
+                with btn1:
+                    if st.button("💾 Kaydet", key=f"kyt_{didx}",
+                                 type="primary", use_container_width=True):
+                        f_d.kod               = yeni_kod
+                        f_d.adet              = int(yeni_adet)
+                        f_d.toplam_yazar      = int(yeni_tyz)
+                        f_d.yazar_sirasi      = int(yeni_sira)
+                        f_d.sorumlu_veya_senyör = yeni_sor
+                        f_d.q_degeri          = yeni_q or None
+                        f_d.patent_durum      = yeni_pd
+                        f_d._kunye            = yeni_kunye.strip()
+                        f_d.docent_sonrasi    = yeni_docsn
+                        st.rerun()
+                with btn2:
+                    if st.button("🗑 Sil", key=f"sil_{didx}",
+                                 use_container_width=True):
+                        st.session_state.faaliyetler.pop(didx)
+                        st.rerun()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HESAPLA + PDF çubuğu
+# ─────────────────────────────────────────────────────────────────────────────
+st.divider()
+n_f = len(st.session_state.faaliyetler)
+
+bar1, bar2, bar3 = st.columns([3, 1, 1], gap="small")
+
+with bar1:
+    if n_f:
+        st.markdown(
+            f"<div style='padding:8px 0;color:#475569;font-size:0.9em'>"
+            f"<span class='faaliyet-badge'>{n_f}</span> "
+            f"faaliyet girildi. Sonuçları görmek için <b>HESAPLA</b>'ya basın."
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            "<div style='padding:8px 0;color:#94A3B8;font-size:0.9em'>"
+            "Faaliyetler sekmesinden faaliyet ekleyin, ardından HESAPLA'ya basın."
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+with bar2:
+    if st.button("▶  HESAPLA", type="primary", use_container_width=True):
+        if not st.session_state.faaliyetler:
+            st.error("Önce en az bir faaliyet ekleyin.")
+        else:
+            # Profesör için 5 yıl kriteri kontrolü
+            _kadro_h = st.session_state.get("v_kadro","")
+            _doc_yil_h = int(st.session_state.get("v_docent_yil", 0) or 0)
+            import datetime as _dt2
+            _prof_5yil_ok = True
+            _prof_5yil_mesaj = ""
+            if _kadro_h == "profesor" and _doc_yil_h > 0:
+                _gecen_h = _dt2.date.today().year - _doc_yil_h
+                if _gecen_h < 5:
+                    _prof_5yil_ok = False
+                    _prof_5yil_mesaj = (
+                        f"Doçentlik üzerinden {_gecen_h} yıl geçmiş "
+                        f"(en az 5 yıl gereklidir)."
+                    )
+            # ÜAK Madde 11(b)-2 kriteri teyidi
+            _uak_krit_ok = True
+            _uak_krit_mesaj = ""
+            if _kadro_h == "profesor" and _doc_yil_h > 0:
+                if not st.session_state.get("v_uak_docent_kriteri", False):
+                    _uak_krit_ok = False
+                    _uak_krit_mesaj = (
+                        f"Madde 11(b)-2: {_doc_yil_h} dönemindeki ÜAK doçentlik "
+                        f"kriterlerini yeniden sağladığınızı teyit etmediniz."
+                    )
+            st.session_state["_prof_5yil_ok"]    = _prof_5yil_ok
+            st.session_state["_prof_5yil_mesaj"] = _prof_5yil_mesaj
+            st.session_state["_uak_krit_ok"]     = _uak_krit_ok
+            st.session_state["_uak_krit_mesaj"]  = _uak_krit_mesaj
+            aday = _aday_olustur()
+            # Doçentlik yılını adaya ekle (PDF için)
+            aday._docent_yil     = _doc_yil_h
+            aday._uak_krit_teyit = st.session_state.get("v_uak_docent_kriteri", False)
+            st.session_state.son_aday = aday
+            st.session_state.sonuc    = t.kriter_kontrol(aday)
+            st.rerun()
+
+with bar3:
+    if st.session_state.sonuc and st.session_state.son_aday and PDF_OK:
+        pdf_data = _pdf_bytes(st.session_state.son_aday,
+                              st.session_state.sonuc)
+        isim = st.session_state.son_aday.ad_soyad.replace(" ", "_")
+        st.download_button(
+            label="⬇  PDF İndir",
+            data=pdf_data,
+            file_name=f"TNKU_{isim}.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+        )
+    elif not PDF_OK and st.session_state.sonuc:
+        st.caption("PDF için: `pip install reportlab`")
+
+# ═══════════════════════════════════════ SONUÇLAR ════════════════════════════
+sonuc    = st.session_state.sonuc
+son_aday = st.session_state.son_aday
+
+if sonuc is not None and son_aday is not None:
+    st.divider()
+
+
+    # Profesör için doçentlik sonrası puan özeti
+    if son_aday.kadro_turu == "profesor":
+        doc_son_faaliyetler = [f for f in son_aday.faaliyetler if f.docent_sonrasi]
+        if doc_son_faaliyetler:
+            from tnku_atama import puan_hesapla as _ph, AdayBilgi as _AB
+            _aday_doc = _AB(
+                ad_soyad=son_aday.ad_soyad,
+                alan=son_aday.alan,
+                kadro_turu="profesor",
+                faaliyetler=doc_son_faaliyetler,
+            )
+            _sonuc_doc = _ph(_aday_doc)
+            _p2_doc    = _sonuc_doc.get("puan2", 0)
+            _p1_doc    = _sonuc_doc.get("puan1", 0)
+            with st.expander(
+                f"📊 Doçentlik Sonrası Faaliyet Özeti "
+                f"({len(doc_son_faaliyetler)} faaliyet · "
+                f"P1: {_p1_doc:.1f} · P2: {_p2_doc:.1f})",
+                expanded=False
+            ):
+                st.caption(
+                    "Madde 11(b)-2 gereği profesörlük için doçentlik sonrası "
+                    "faaliyetleriniz ayrıca aşağıda listelenmiştir. "
+                    "Bu faaliyetlerin doçentlik alındığı dönemin ÜAK kriterlerini "
+                    "karşılaması gerekmektedir."
+                )
+                st.markdown(
+                    f"[🔗 ÜAK Doçentlik Başvuru Şartları Arşivi]"
+                    f"(https://www.uak.gov.tr/page/docentlik-basvuru-sartlari-kLPHX)"
+                )
+                _rows_doc = []
+                for _i, _f in enumerate(doc_son_faaliyetler):
+                    from tnku_atama import EK2_PUANLAR as _EK2, faaliyet_puan_hesapla as _fpuan
+                    _ad = _EK2.get(_f.kod, {}).get("ad","")[:50]
+                    _pp, _ = _fpuan(_f)
+                    _rows_doc.append({
+                        "#": _i+1, "Kod": _f.kod, "Faaliyet": _ad,
+                        "Adet": _f.adet,
+                        "Yazar": f"{_f.yazar_sirasi}/{_f.toplam_yazar}",
+                        "Q": _f.q_degeri or "",
+                        "Puan": round(_pp, 2),
+                    })
+                import pandas as _pd2
+                st.dataframe(_pd2.DataFrame(_rows_doc), use_container_width=True,
+                             hide_index=True)
+
+                _uak_teyit = st.session_state.get("v_uak_docent_kriteri", False)
+                if _uak_teyit:
+                    st.success("✅ ÜAK Madde 11(b)-2 kriteri teyit edilmiştir.")
+                else:
+                    st.warning("⚠️ ÜAK Madde 11(b)-2 kriteri henüz teyit edilmemiştir.")
+
+        pnlar = sonuc["puanlar"]
+    genel = sonuc["genel_sonuc"]
+
+    kadro_adi_tam = {
+        "dr_ilk":     "Dr. Öğretim Üyesi – İlk Atanma",
+        "dr_yeniden": f"Dr. Öğretim Üyesi – Yeniden Atanma ({son_aday.yeniden_sure} Yıl)",
+        "docent":     "Doçent",
+        "profesor":   "Profesör",
+    }.get(son_aday.kadro_turu, "–")
+
+    # ── Sonuç bandı ──────────────────────────────────────────────────────────
+    # Ek kriterler (Profesörlük)
+    _p5ok   = st.session_state.get("_prof_5yil_ok", True)
+    _p5msg  = st.session_state.get("_prof_5yil_mesaj", "")
+    _uakok  = st.session_state.get("_uak_krit_ok", True)
+    _uakmsg = st.session_state.get("_uak_krit_mesaj", "")
+
+    if not _p5ok:
+        st.error(f"⛔ 5 YIL KRİTERİ: {_p5msg}")
+    if not _uakok:
+        st.warning(f"⚠️ ÜAK MADDESİ 11(b)-2: {_uakmsg}")
+        st.markdown(
+            "[🔗 ÜAK Doçentlik Başvuru Şartları Arşivi]"
+            "(https://www.uak.gov.tr/page/docentlik-basvuru-sartlari-kLPHX)"
+        )
+
+    _ek_ok = _p5ok and _uakok
+    ikon  = "✅" if (genel and _ek_ok) else "❌"
+    gtxt  = ("TÜM KRİTERLER SAĞLANIYOR – BAŞVURU YAPILABİLİR"
+             if (genel and _ek_ok) else
+             "BAZI KRİTERLER SAĞLANMIYOR – BAŞVURU YAPILAMAZ")
+    cls   = "sonuc-ok" if (genel and _ek_ok) else "sonuc-fail"
+    st.markdown(f'<div class="{cls}">{ikon}  {gtxt}</div>',
+                unsafe_allow_html=True)
+
+    # ── Aday özeti ───────────────────────────────────────────────────────────
+    sc1, sc2, sc3, sc4 = st.columns(4, gap="small")
+    sc1.metric("Aday",  son_aday.ad_soyad)
+    sc2.metric("Alan",  son_aday.alan)
+    sc3.metric("Kadro", kadro_adi_tam)
+    sc4.metric("Tarih", datetime.date.today().strftime("%d.%m.%Y"))
+
+    st.divider()
+
+    # ── Puan kutuları ─────────────────────────────────────────────────────────
+    st.markdown('<div class="card-title">PUAN ÖZETİ</div>',
+                unsafe_allow_html=True)
+    pc1, pc2, pc3 = st.columns(3, gap="medium")
+    with pc1:
+        st.markdown(
+            f"<div class='puan-kutu'>"
+            f"<div class='label'>PUAN-1 (EK-2: 1.1–1.6)</div>"
+            f"<div class='value'>{pnlar['puan1']:.2f}</div>"
+            f"</div>", unsafe_allow_html=True)
+    with pc2:
+        st.markdown(
+            f"<div class='puan-kutu'>"
+            f"<div class='label'>PUAN-2 (EK-2 tamamı)</div>"
+            f"<div class='value'>{pnlar['puan2']:.2f}</div>"
+            f"</div>", unsafe_allow_html=True)
+    with pc3:
+        st.markdown(
+            f"<div class='puan-kutu toplam'>"
+            f"<div class='label'>TOPLAM PUAN</div>"
+            f"<div class='value'>{pnlar['toplam']:.2f}</div>"
+            f"</div>", unsafe_allow_html=True)
+
+    st.divider()
+
+    # ── Kriter kontrol ───────────────────────────────────────────────────────
+    st.markdown('<div class="card-title">KRİTER KONTROL SONUÇLARI</div>',
+                unsafe_allow_html=True)
+    for kr in sonuc["kriterler"]:
+        ok        = "✓" in kr["durum"]
+        info_only = "(f) Bilgi:" in kr["kriter"]
+        if info_only:
+            css, ikon2 = "kriter-info", "ℹ️"
+        elif ok:
+            css, ikon2 = "kriter-ok",  "✓"
+        else:
+            css, ikon2 = "kriter-fail", "✗"
+        not_str = (f"&nbsp;&nbsp;<small style='color:#6B7280'>— {kr['notlar']}</small>"
+                   if kr["notlar"] else "")
+        st.markdown(
+            f'<div class="{css}"><b>{ikon2}</b>&nbsp;&nbsp;'
+            f'{kr["kriter"]}{not_str}</div>',
+            unsafe_allow_html=True,
+        )
+
+    st.divider()
+
+    # ── Faaliyet detayı ──────────────────────────────────────────────────────
+    st.markdown('<div class="card-title">FAALİYET DETAYI</div>',
+                unsafe_allow_html=True)
+    drows = [
+        {
+            "Kod":      d["kod"],
+            "Faaliyet": d["ad"][:60],
+            "Adet":     d["adet"],
+            "Puan":     round(d["puan"], 2),
+            "Tur":      "PUAN-1" if d["puan1_mi"] else "PUAN-2",
+        }
+        for d in pnlar["detaylar"]
+    ]
+    if drows:
+        ddf = pd.DataFrame(drows)
+        st.dataframe(
+            ddf.style.map(_tur_renk, subset=["Tur"]),
+            use_container_width=True,
+            height=min(420, 50 + 36 * len(drows)),
+        )
+
+    st.markdown(
+        "<div style='text-align:center;color:#94A3B8;font-size:0.78em;"
+        "padding:16px 0 4px'>EYS-YNG-129 · TNKÜ · Otomatik hesaplama aracıdır,"
+        " resmi başvurularda ilgili birime danışınız.</div>",
+        unsafe_allow_html=True,
+    )
