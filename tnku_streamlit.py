@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 TNKÜ Öğretim Üyeliği Kadrosuna Başvuru Puanlama Programı – Web Arayüzü
-Tekirdağ Namık Kemal Üniversitesi | EYS-YNG-129 (28.03.2025)
+Tekirdağ Namık Kemal Üniversitesi | EYS-YNG-129 Rev.2 (10.08.2026)
 
 Çalıştırmak için:
     pip install streamlit pandas reportlab
@@ -1116,7 +1116,7 @@ def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
     elems = []
     elems.append(Paragraph("TEKIRDAG NAMIK KEMAL UNIVERSITESI", s_title))
     elems.append(Paragraph("Ogretim Uyeligi - Atama Puanlama Raporu", s_sub))
-    elems.append(Paragraph("EYS-YNG-129  |  28.03.2025", s_xs))
+    elems.append(Paragraph("EYS-YNG-129 Rev.2  |  10.08.2026", s_xs))
     elems.append(HRFlowable(width="100%", thickness=2,
                              color=colors.HexColor("#2E5DA3")))
     elems.append(Spacer(1, 8))
@@ -1328,7 +1328,7 @@ def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
                              color=colors.HexColor("#AAAAAA")))
     elems.append(Spacer(1, 4))
     elems.append(Paragraph(
-        "Bu rapor TNKU EYS-YNG-129 yonergesi kapsaminda otomatik olarak "
+        "Bu rapor TNKU EYS-YNG-129 Rev.2 (10.08.2026) yonergesi kapsaminda otomatik olarak "
         "olusturulmustur. Resmi basvurularda ilgili birime danisiniz.", s_xs))
 
     doc.build(elems)
@@ -1342,7 +1342,7 @@ def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
 st.markdown("""
 <div class="header-bar">
   <h2>🎓&nbsp; TNKÜ &nbsp;·&nbsp; Öğretim Üyeliği Atama Puanlama Sistemi</h2>
-  <small>EYS-YNG-129 &nbsp;·&nbsp; 28.03.2025 &nbsp;·&nbsp;
+  <small>EYS-YNG-129 Rev.2 &nbsp;·&nbsp; 10.08.2026 &nbsp;·&nbsp;
   Tekirdağ Namık Kemal Üniversitesi</small>
 </div>
 """, unsafe_allow_html=True)
@@ -2093,7 +2093,7 @@ if sonuc is not None and son_aday is not None:
 
     st.markdown(
         "<div style='text-align:center;color:#94A3B8;font-size:0.78em;"
-        "padding:16px 0 4px'>EYS-YNG-129 · TNKÜ · Otomatik hesaplama aracıdır,"
+        "padding:16px 0 4px'>EYS-YNG-129 Rev.2 · 10.08.2026 · TNKÜ · Otomatik hesaplama aracıdır,"
         " resmi başvurularda ilgili birime danışınız.</div>",
         unsafe_allow_html=True,
     )

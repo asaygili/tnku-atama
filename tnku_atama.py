@@ -1,6 +1,6 @@
 """
 TNKÜ Öğretim Üyeliği Kadrosuna Başvuru Puanlama Programı
-Tekirdağ Namık Kemal Üniversitesi - EYS-YNG-129 (28.03.2025)
+Tekirdağ Namık Kemal Üniversitesi - EYS-YNG-129 Rev.2 (10.08.2026)
 
 Desteklenen kadro türleri:
   - Dr. Öğretim Üyesi (İlk Atanma ve Yeniden Atama)
@@ -854,9 +854,14 @@ def kriter_kontrol(aday: AdayBilgi) -> dict:
 
         # PUAN-1 = kodlar 1.1–1.6 + 2.1, 2.2, 2.4, 2.5 (puan_hesapla hesapladı)
         # (d): 2.1/2.2/2.4/2.5'ten gelen PUAN-1 payı, P1 asgari'nin %25'iyle sınırlı
-        p1_kitap_max   = puan1_asgarisi * 0.25
-        p1_kitap_asiri = max(0.0, puanlar["puan1_kitap_yeniden"] - p1_kitap_max)
-        p1_efektif     = p1 - p1_kitap_asiri  # (d) fazlası P1'den düşülür
+        #      ANCAK: 1 yıllık yeniden atamada bu sınırlama geçerli değildir (Not d)
+        if sure == 1:
+            p1_kitap_asiri = 0.0
+            p1_efektif     = p1
+        else:
+            p1_kitap_max   = puan1_asgarisi * 0.25
+            p1_kitap_asiri = max(0.0, puanlar["puan1_kitap_yeniden"] - p1_kitap_max)
+            p1_efektif     = p1 - p1_kitap_asiri  # (d) fazlası P1'den düşülür
         # (a) PUAN-1 fazlası → PUAN-2
         p1_fazla   = max(0.0, p1_efektif - puan1_asgarisi)
         p2_efektif = p2 + p1_fazla + p1_kitap_asiri  # (d) + (a) fazlası P2'ye
@@ -871,9 +876,14 @@ def kriter_kontrol(aday: AdayBilgi) -> dict:
             if p1_kitap_asiri > 0:
                 p1_not += (f"  [(d) 2.1/2.2/2.4/2.5 fazlası "
                            f"{round(p1_kitap_asiri, 2)} puan P2'ye aktarıldı]")
-            ekle(f"PUAN-1 ≥{puan1_asgarisi} (EK-2: 1.1–1.6, 2.1/2.2/2.4/2.5; (d) %25 üst sınır)",
-                 p1_efektif >= puan1_asgarisi,
-                 p1_not)
+            if sure == 1:
+                ekle("PUAN-1 ≥{} (EK-2: 1.1–1.6, 2.1/2.2/2.4/2.5; (d) %25 sınırı 1-yıl için geçerli değil)".format(puan1_asgarisi),
+                     p1_efektif >= puan1_asgarisi,
+                     p1_not)
+            else:
+                ekle(f"PUAN-1 ≥{puan1_asgarisi} (EK-2: 1.1–1.6, 2.1/2.2/2.4/2.5; (d) %25 üst sınır)",
+                     p1_efektif >= puan1_asgarisi,
+                     p1_not)
         ekle(f"PUAN-2 ≥{puan2_asgarisi} (EK-2 tamamı, P1 fazlası dahil)",
              p2_efektif >= puan2_asgarisi,
              f"PUAN-2 + P1 fazlası: {round(p2_efektif, 2)}")
@@ -1194,7 +1204,7 @@ def rapor_yazdir(aday: AdayBilgi):
 
     print("=" * 70)
     print("TNKÜ ÖĞRETİM ÜYELİĞİ ATAMA PUANLAMA RAPORU")
-    print("EYS-YNG-129 | 28.03.2025")
+    print("EYS-YNG-129 Rev.2 | 10.08.2026")
     print("=" * 70)
     print(f"Aday         : {aday.ad_soyad}")
     print(f"Alan         : {aday.alan}" + (" (Güzel Sanatlar)" if aday.guzel_sanat else ""))
@@ -1230,7 +1240,7 @@ def rapor_yazdir(aday: AdayBilgi):
 def ana_menu():
     print("=" * 70)
     print("TNKÜ ÖĞRETİM ÜYELİĞİ ATAMA PUANLAMA PROGRAMI")
-    print("Tekirdağ Namık Kemal Üniversitesi – EYS-YNG-129 (28.03.2025)")
+    print("Tekirdağ Namık Kemal Üniversitesi – EYS-YNG-129 Rev.2 (10.08.2026)")
     print("=" * 70)
 
     aday = AdayBilgi()
