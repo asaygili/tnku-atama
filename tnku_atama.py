@@ -11,7 +11,8 @@ Desteklenen kadro türleri:
 from __future__ import annotations
 import sys
 import io
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from datetime import date
 from typing import Optional
 
 # Windows terminalinde UTF-8 çıktı için
@@ -24,7 +25,9 @@ if sys.platform == "win32":
 
 # ---------------------------------------------------------------------------
 # Yazar sırası çarpanları (Madde 8)
-# Sorumlu Yazar / Senyör Yazar → 1. isimle aynı değer
+# Madde 8 yalnızca yazar sırasına bakar; Sorumlu / Senyör yazar olmak puanı
+# değiştirmez. (Bu nitelik sadece Dr. Öğr. Üyesi EK-1 (b) kuralında geçer.)
+# 6'dan fazla yazarlı eserde 7. ve sonraki isimler tablodaki son değeri (%25) alır.
 # ---------------------------------------------------------------------------
 YAZAR_CARPANI = {
     1: [1.00],
@@ -37,11 +40,8 @@ YAZAR_CARPANI = {
 YAZAR_CARPANI_6PLUS = [0.75, 0.65, 0.55, 0.45, 0.35, 0.25]
 
 
-def yazar_carpani_hesapla(toplam_yazar: int, yazar_sirasi: int,
-                          sorumlu_veya_senyör: bool = False) -> float:
-    """Yazar sırasına göre puan çarpanını döndürür."""
-    if sorumlu_veya_senyör:
-        yazar_sirasi = 1  # 1. isimle aynı değerlendirme
+def yazar_carpani_hesapla(toplam_yazar: int, yazar_sirasi: int) -> float:
+    """Yazar sırasına göre puan çarpanını döndürür (Madde 8)."""
     if toplam_yazar == 1:
         return 1.00
     if toplam_yazar <= 5:
@@ -614,14 +614,20 @@ class Faaliyet:
     adet: int = 1             # kaç adet yapıldı
     toplam_yazar: int = 1     # yayın için toplam yazar sayısı
     yazar_sirasi: int = 1     # kişinin yazar sırası
-    sorumlu_veya_senyör: bool = False  # Sorumlu/Senyör yazar mı?
+    # Sorumlu/Senyör yazar mı? Puanı etkilemez; yalnızca EK-1 (b) için kullanılır.
+    sorumlu_veya_senyör: bool = False
     q_degeri: Optional[str] = None    # "Q1", "Q2", "Q3", "Q4" (1.1/1.3/4.1 için)
     # Patent durumu için (11.1, 11.7)
     patent_durum: Optional[str] = None  # "tescilli", "arastirma_raporu", "basvuru"
     # İkinci danışman mı? (17.1, 17.2)
     ikinci_danisман: bool = False
-    # Doçentlik sonrası mı?
+    # Doçentlik başvurusu sonrası mı? (yayin_tarihi ve başvuru tarihi
+    # biliniyorsa tarih karşılaştırması bu işaretin yerine geçer)
     docent_sonrasi: bool = False
+    # Yayın / faaliyet tarihi
+    yayin_tarihi: Optional[date] = None
+    # Profesörlükte "Başlıca Araştırma Eseri" olarak sunulan eser mi? (Md. 11(5))
+    baslica_eser: bool = False
 
 
 def q_carpan_al(q: Optional[str]) -> float:
@@ -663,9 +669,7 @@ def faaliyet_puan_hesapla(f: Faaliyet) -> tuple[float, bool]:
 
     # Yazar çarpanı (yayınlar için)
     if f.toplam_yazar > 0 and grup in {1, 2, 3}:
-        yc = yazar_carpani_hesapla(f.toplam_yazar, f.yazar_sirasi,
-                                   f.sorumlu_veya_senyör)
-        taban = taban * yc
+        taban = taban * yazar_carpani_hesapla(f.toplam_yazar, f.yazar_sirasi)
 
     puan = taban * f.adet
 
@@ -691,14 +695,79 @@ class AdayBilgi:
 
     # Genel kriterler
     doktora_var: bool = False
-    yabanci_dil_puani: float = 0.0
+    yabanci_dil_puani: float = 0.0          # yabancı dil bölümünde: alan dili
+    ikinci_yabanci_dil_puani: float = 0.0   # yalnızca yabancı dil bölümlerinde
     calisma_alani_yabanci_dil_bolumu: bool = False
     ornek_ders_basarili: bool = False
     uak_docent: bool = False
     sifahi_sinav_basarili: bool = False
     doktora_sonrasi_ders_yari_yil: int = 0  # Doçent/Prof. için ≥4 dönem
     docent_sonrasi_sure_yil: float = 0.0   # Prof. için ≥2.5 yıl
-    baslica_arastirma_eseri_var: bool = False  # Prof. için
+
+    # Profesörlük tarihleri
+    docent_basvuru_tarihi: Optional[date] = None  # (g) ve Md. 11(2) referansı
+    docent_unvan_tarihi: Optional[date] = None    # Md. 11(5)-(7) ve 5 yıl
+    degerlendirme_tarihi: Optional[date] = None   # None → bugün
+    # Md. 11(2): doçentlik başvuru dönemindeki ÜAK kriterlerini doçentlik
+    # başvurusu sonrası çalışmalarla yeniden sağladığına dair beyan
+    uak_kriterleri_yeniden_saglandi: bool = False
+
+
+# ── Profesörlük yardımcıları ───────────────────────────────────────────────
+PROF_ASGARI_SURE_YIL = 5   # 2547 s. Kanun md. 26 – doçentlikten sonra yasal süre
+
+BASLICA_ESER_KODLARI = {
+    "ALAN-1": frozenset(["1.1"]),
+    "ALAN-2": frozenset(["1.1", "1.3", "1.4", "2.1", "2.2", "2.4"]),
+}
+
+
+def yil_ekle(d: date, yil: int) -> date:
+    """Tarihe yıl ekler; 29 Şubat → 28 Şubat."""
+    try:
+        return d.replace(year=d.year + yil)
+    except ValueError:
+        return d.replace(year=d.year + yil, day=28)
+
+
+def docent_basvuru_sonrasi_mi(f: Faaliyet, aday: AdayBilgi) -> bool:
+    """Faaliyet doçentlik başvurusundan sonra mı? (EK-1 (g), Md. 11(2))
+
+    Yayın tarihi ve başvuru tarihi biliniyorsa tarihler karşılaştırılır,
+    aksi hâlde kullanıcının işaretlediği `docent_sonrasi` değeri kullanılır.
+    """
+    if f.yayin_tarihi and aday.docent_basvuru_tarihi:
+        return f.yayin_tarihi > aday.docent_basvuru_tarihi
+    return f.docent_sonrasi
+
+
+def baslica_eser_sorunlari(aday: AdayBilgi) -> list[str]:
+    """Md. 11(5) Başlıca Araştırma Eseri koşullarını denetler.
+    Boş liste → koşul sağlanıyor."""
+    eserler = [f for f in aday.faaliyetler if f.baslica_eser]
+    if not eserler:
+        return ["Başlıca Araştırma Eseri olarak işaretlenmiş eser yok"]
+    if len(eserler) > 1:
+        return [f"{len(eserler)} eser işaretlenmiş; yalnızca bir eser sunulmalı"]
+
+    f = eserler[0]
+    sorunlar = []
+    izinli = BASLICA_ESER_KODLARI.get(aday.alan, BASLICA_ESER_KODLARI["ALAN-1"])
+    if f.kod not in izinli:
+        sorunlar.append(f"EK-2 {f.kod} kabul edilmez ({aday.alan} için: "
+                        f"{', '.join(sorted(izinli))})")
+    if not (f.toplam_yazar == 1 or f.yazar_sirasi == 1):
+        sorunlar.append(f"aday başlıca yazar değil (yazar sırası "
+                        f"{f.yazar_sirasi}/{f.toplam_yazar}; tek veya ilk yazar olmalı)")
+    if not aday.docent_unvan_tarihi:
+        sorunlar.append("doçentlik unvan tarihi girilmemiş")
+    elif not f.yayin_tarihi:
+        sorunlar.append("eserin yayın tarihi girilmemiş")
+    elif f.yayin_tarihi <= aday.docent_unvan_tarihi:
+        sorunlar.append(f"eser doçentlik unvanından sonra yayımlanmamış "
+                        f"({f.yayin_tarihi:%d.%m.%Y} ≤ "
+                        f"{aday.docent_unvan_tarihi:%d.%m.%Y})")
+    return sorunlar
 
 
 def puan_hesapla(aday: AdayBilgi) -> dict:
@@ -791,20 +860,27 @@ def kriter_kontrol(aday: AdayBilgi) -> dict:
                          "notlar": notlar})
         return durum
 
+    def yabanci_dil_kontrol(esik: int):
+        """Md. 9(1)b, 10(2), 11(4): yabancı dil bölümlerinde alan dilinden ≥85
+        ve ikinci yabancı dilden ≥esik; diğer bölümlerde ≥esik."""
+        if aday.calisma_alani_yabanci_dil_bolumu:
+            ekle("Yabancı dil – çalışma alanı dili ≥85",
+                 aday.yabanci_dil_puani >= 85,
+                 f"Girilen puan: {aday.yabanci_dil_puani}")
+            ekle(f"Yabancı dil – ikinci yabancı dil ≥{esik}",
+                 aday.ikinci_yabanci_dil_puani >= esik,
+                 f"Girilen puan: {aday.ikinci_yabanci_dil_puani}")
+        else:
+            ekle(f"Yabancı dil (YÖKDİL/YDS) ≥{esik}",
+                 aday.yabanci_dil_puani >= esik,
+                 f"Girilen puan: {aday.yabanci_dil_puani}")
+
     if aday.kadro_turu == "dr_ilk":
         # --- Dr. Öğretim Üyesi İlk Atanma ---
         ekle("Doktora/Uzmanlık/Yeterlilik",
              aday.doktora_var)
 
-        # Yabancı dil
-        if aday.calisma_alani_yabanci_dil_bolumu:
-            ekle("Yabancı dil ≥85",
-                 aday.yabanci_dil_puani >= 85,
-                 f"Girilen puan: {aday.yabanci_dil_puani}")
-        else:
-            ekle("Yabancı dil (YÖKDİL/YDS) ≥60",
-                 aday.yabanci_dil_puani >= 60,
-                 f"Girilen puan: {aday.yabanci_dil_puani}")
+        yabanci_dil_kontrol(60)
 
         ekle("Örnek ders başarısı",
              aday.ornek_ders_basarili)
@@ -898,14 +974,7 @@ def kriter_kontrol(aday: AdayBilgi) -> dict:
         ekle("ÜAK sözlü sınavı geçildi (zorunlu)",
              aday.sifahi_sinav_basarili)
 
-        if aday.calisma_alani_yabanci_dil_bolumu:
-            ekle("Yabancı dil ≥85",
-                 aday.yabanci_dil_puani >= 85,
-                 f"Girilen puan: {aday.yabanci_dil_puani}")
-        else:
-            ekle("Yabancı dil ≥65",
-                 aday.yabanci_dil_puani >= 65,
-                 f"Girilen puan: {aday.yabanci_dil_puani}")
+        yabanci_dil_kontrol(65)
 
         ekle("Doktora sonrası ≥4 farklı yarıyıl ders",
              aday.doktora_sonrasi_ders_yari_yil >= 4,
@@ -946,14 +1015,24 @@ def kriter_kontrol(aday: AdayBilgi) -> dict:
                  aday.ornek_ders_basarili)
             sinav_carpan = 1.20
 
-        if aday.calisma_alani_yabanci_dil_bolumu:
-            ekle("Yabancı dil ≥85",
-                 aday.yabanci_dil_puani >= 85,
-                 f"Girilen puan: {aday.yabanci_dil_puani}")
+        yabanci_dil_kontrol(65)
+
+        # Doçentlik unvanından itibaren yasal süre (Md. 11(6) atfı, 2547/26)
+        bugun = aday.degerlendirme_tarihi or date.today()
+        if aday.docent_unvan_tarihi:
+            dolum = yil_ekle(aday.docent_unvan_tarihi, PROF_ASGARI_SURE_YIL)
+            ekle(f"Doçentlik unvanından itibaren {PROF_ASGARI_SURE_YIL} yıl dolmuş",
+                 bugun >= dolum,
+                 f"Unvan: {aday.docent_unvan_tarihi:%d.%m.%Y} → "
+                 f"süre dolumu: {dolum:%d.%m.%Y}")
         else:
-            ekle("Yabancı dil ≥65",
-                 aday.yabanci_dil_puani >= 65,
-                 f"Girilen puan: {aday.yabanci_dil_puani}")
+            ekle(f"Doçentlik unvanından itibaren {PROF_ASGARI_SURE_YIL} yıl dolmuş",
+                 False, "Doçentlik unvan tarihi girilmemiş")
+
+        ekle("Md. 11(2) Doçentlik başvuru dönemi ÜAK kriterleri, doçentlik "
+             "başvurusu sonrası çalışmalarla yeniden sağlanmış (beyan)",
+             aday.uak_kriterleri_yeniden_saglandi,
+             "" if aday.uak_kriterleri_yeniden_saglandi else "Beyan işaretlenmemiş")
 
         ekle("Doçent sonrası ≥4 farklı yarıyıl ders",
              aday.doktora_sonrasi_ders_yari_yil >= 4,
@@ -963,8 +1042,11 @@ def kriter_kontrol(aday: AdayBilgi) -> dict:
              aday.docent_sonrasi_sure_yil >= 2.5,
              f"Girilen: {aday.docent_sonrasi_sure_yil} yıl")
 
-        ekle("Başlıca Araştırma Eseri sunulmuş (başlıca yazar olarak)",
-             aday.baslica_arastirma_eseri_var)
+        eser_sorunlari = baslica_eser_sorunlari(aday)
+        ekle("Md. 11(5) Başlıca Araştırma Eseri (doçentlik sonrası, uygun tür, "
+             "başlıca yazar)",
+             not eser_sorunlari,
+             "; ".join(eser_sorunlari))
 
         puan1_asgarisi = 50
         puan2_asgarisi = 500
@@ -984,14 +1066,16 @@ def kriter_kontrol(aday: AdayBilgi) -> dict:
         p1_fazla   = max(0.0, p1 - p1_min)
         p2_efektif = p2 + p1_fazla
 
-        # (g) Puanların ≥yarısı doçent sonrası olmalı
-        docent_sonrasi = sum(
-            faaliyet_puan_hesapla(f)[0]
-            for f in aday.faaliyetler if f.docent_sonrasi
-        )
-        ekle(f"(g) Puanların en az yarısı (≥{int(top_min//2)}) doçent sonrası",
+        # (g) Puanların ≥yarısı doçentlik başvurusu sonrası olmalı.
+        # Grup tavanları (atıf 50, editörlük 40 vb.) bu alt kümeye de uygulanır.
+        sonrasi = [f for f in aday.faaliyetler
+                   if docent_basvuru_sonrasi_mi(f, aday)]
+        docent_sonrasi = puan_hesapla(replace(aday, faaliyetler=sonrasi))["toplam"]
+        ekle(f"(g) Puanların en az yarısı (≥{top_min / 2:g}) doçentlik "
+             f"başvurusu sonrası",
              docent_sonrasi >= top_min / 2,
-             f"Doçent sonrası puan: {round(docent_sonrasi, 2)}")
+             f"Doçentlik başvurusu sonrası puan (tavanlar uygulanmış): "
+             f"{round(docent_sonrasi, 2)}")
 
         ekle(f"PUAN-1 ≥{p1_min} (EK-2: 1.1–1.6){sinav_not}",
              p1 >= p1_min,
@@ -1054,7 +1138,19 @@ def sayi_al(prompt: str, tam: bool = False,
             print("  Geçersiz sayı.")
 
 
-def faaliyet_ekle_interaktif() -> list[Faaliyet]:
+def tarih_al(prompt: str, zorunlu: bool = False) -> Optional[date]:
+    while True:
+        v = input(f"{prompt}: ").strip()
+        if not v and not zorunlu:
+            return None
+        try:
+            g, a, y = (int(x) for x in v.replace("/", ".").split("."))
+            return date(y, a, g)
+        except ValueError:
+            print("  Geçersiz tarih (örn. 15.03.2021).")
+
+
+def faaliyet_ekle_interaktif(kadro_turu: str = "") -> list[Faaliyet]:
     """Kullanıcıdan faaliyet listesi alır."""
     faaliyetler: list[Faaliyet] = []
 
@@ -1139,13 +1235,12 @@ def faaliyet_ekle_interaktif() -> list[Faaliyet]:
         docent_s = False
 
         if bilgi["grup"] in {1, 2, 3}:
-            if evet_hayir("  Sorumlu yazar veya Senyör yazar mısınız?"):
-                sorumlu = True
-            else:
-                toplam_yazar = int(sayi_al("  Toplam yazar sayısı", tam=True, min_val=1, max_val=50))
-                if toplam_yazar > 1:
-                    yazar_sirasi = int(sayi_al(f"  Kişinin yazar sırası (1-{toplam_yazar})",
-                                               tam=True, min_val=1, max_val=toplam_yazar))
+            toplam_yazar = int(sayi_al("  Toplam yazar sayısı", tam=True, min_val=1, max_val=50))
+            if toplam_yazar > 1:
+                yazar_sirasi = int(sayi_al(f"  Kişinin yazar sırası (1-{toplam_yazar})",
+                                           tam=True, min_val=1, max_val=toplam_yazar))
+            sorumlu = evet_hayir("  Sorumlu yazar veya Senyör yazar mısınız? "
+                                 "(puanı değiştirmez)")
 
         if bilgi.get("q_carpan"):
             q_val = sec("  Q değeri",
@@ -1161,7 +1256,14 @@ def faaliyet_ekle_interaktif() -> list[Faaliyet]:
         if kod in ("17.1", "17.2"):
             ikinci_d = evet_hayir("  İkinci danışman mısınız? (yarı puan)")
 
-        docent_s = evet_hayir("  Bu faaliyet doçentlik sonrası mı?")
+        yayin_t = None
+        baslica = False
+        if kadro_turu == "profesor":
+            yayin_t = tarih_al("  Yayın/faaliyet tarihi (gg.aa.yyyy, boş = bilinmiyor)")
+            if yayin_t is None:
+                docent_s = evet_hayir("  Bu faaliyet doçentlik başvurusu sonrası mı?")
+            if bilgi["grup"] in {1, 2}:
+                baslica = evet_hayir("  Başlıca Araştırma Eseri olarak sunulacak mı?")
 
         f = Faaliyet(
             kod=kod, adet=adet,
@@ -1169,7 +1271,9 @@ def faaliyet_ekle_interaktif() -> list[Faaliyet]:
             sorumlu_veya_senyör=sorumlu,
             q_degeri=q_val, patent_durum=patent_durum,
             ikinci_danisман=ikinci_d,
-            docent_sonrasi=docent_s
+            docent_sonrasi=docent_s,
+            yayin_tarihi=yayin_t,
+            baslica_eser=baslica,
         )
         faaliyetler.append(f)
         p_son, _ = faaliyet_puan_hesapla(f)
@@ -1262,11 +1366,20 @@ def ana_menu():
                    {"3": "3 yıl", "2": "2 yıl", "1": "1 yıl"})
         aday.yeniden_sure = int(sure)
 
+    def dil_bilgileri_al():
+        aday.calisma_alani_yabanci_dil_bolumu = evet_hayir("Çalışma alanı yabancı dil bölümü mü?")
+        if aday.calisma_alani_yabanci_dil_bolumu:
+            aday.yabanci_dil_puani = sayi_al("Çalışma alanı dilinde YÖKDİL/YDS puanı",
+                                             min_val=0, max_val=100)
+            aday.ikinci_yabanci_dil_puani = sayi_al("İkinci yabancı dil puanı",
+                                                    min_val=0, max_val=100)
+        else:
+            aday.yabanci_dil_puani = sayi_al("YÖKDİL/YDS puanı", min_val=0, max_val=100)
+
     # Genel kriterler
     if aday.kadro_turu in ("dr_ilk", "dr_yeniden"):
         aday.doktora_var = evet_hayir("Doktora/Uzmanlık/Yeterlilik unvanı var mı?")
-        aday.calisma_alani_yabanci_dil_bolumu = evet_hayir("Çalışma alanı yabancı dil bölümü mü?")
-        aday.yabanci_dil_puani = sayi_al("YÖKDİL/YDS puanı", min_val=0, max_val=100)
+        dil_bilgileri_al()
         if aday.kadro_turu == "dr_ilk":
             aday.ornek_ders_basarili = evet_hayir("Örnek ders jüriden 'Başarılı' aldı mı?")
 
@@ -1274,29 +1387,34 @@ def ana_menu():
         aday.uak_docent = evet_hayir("ÜAK Doçent unvanı var mı?")
         aday.sifahi_sinav_basarili = evet_hayir(
             "Sözlü sınav başarılı mı (veya muafiyetli)?")
-        aday.calisma_alani_yabanci_dil_bolumu = evet_hayir("Çalışma alanı yabancı dil bölümü mü?")
-        aday.yabanci_dil_puani = sayi_al("YÖKDİL/YDS puanı", min_val=0, max_val=100)
+        dil_bilgileri_al()
         aday.doktora_sonrasi_ders_yari_yil = int(
             sayi_al("Doktora sonrası farklı yarıyıl ders sayısı (≥4 gerekli)",
                     tam=True, min_val=0, max_val=100))
 
     elif aday.kadro_turu == "profesor":
         aday.uak_docent = evet_hayir("ÜAK Doçent unvanı var mı?")
+        aday.docent_basvuru_tarihi = tarih_al(
+            "Doçentlik BAŞVURU tarihi (gg.aa.yyyy)", zorunlu=True)
+        aday.docent_unvan_tarihi = tarih_al(
+            "Doçentlik UNVANI alma tarihi (gg.aa.yyyy)", zorunlu=True)
         aday.sifahi_sinav_basarili = evet_hayir(
-            "Sözlü sınav başarılı mı / örnek ders +%20 puan şartı sağlanıyor mu?")
-        aday.calisma_alani_yabanci_dil_bolumu = evet_hayir("Çalışma alanı yabancı dil bölümü mü?")
-        aday.yabanci_dil_puani = sayi_al("YÖKDİL/YDS puanı", min_val=0, max_val=100)
+            "ÜAK sözlü sınavı başarılı mı? (hayır → örnek ders + eşikler %20 fazla)")
+        if not aday.sifahi_sinav_basarili:
+            aday.ornek_ders_basarili = evet_hayir("Örnek ders jüriden 'Başarılı' aldı mı?")
+        dil_bilgileri_al()
         aday.doktora_sonrasi_ders_yari_yil = int(
             sayi_al("Doçent sonrası farklı yarıyıl ders sayısı (≥4 gerekli)",
                     tam=True, min_val=0, max_val=100))
         aday.docent_sonrasi_sure_yil = sayi_al(
             "Doçent unvanı sonrası yükseköğretim kurumunda kaç yıl? (≥2.5 gerekli)",
             min_val=0, max_val=50)
-        aday.baslica_arastirma_eseri_var = evet_hayir(
-            "Başlıca Araştırma Eseri başvuruya eklendi mi (başlıca yazar)?")
+        aday.uak_kriterleri_yeniden_saglandi = evet_hayir(
+            "Doçentlik başvuru dönemindeki ÜAK kriterlerini doçentlik başvurusu "
+            "sonrası çalışmalarınızla yeniden sağladınız mı? (Md. 11(2))")
 
     # Faaliyetler
-    aday.faaliyetler = faaliyet_ekle_interaktif()
+    aday.faaliyetler = faaliyet_ekle_interaktif(aday.kadro_turu)
 
     # Rapor
     rapor_yazdir(aday)
