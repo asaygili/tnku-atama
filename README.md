@@ -29,6 +29,14 @@ Akademik kadro başvurularında (Doktor Öğretim Üyesi, Doçent, Profesör) ad
 
 ---
 
+## ✅ Testler
+Yönerge kurallarının (Madde 8, Madde 11, EK-1) doğru uygulandığını denetleyen testler `tests/` klasöründedir. Ek kurulum gerektirmez:
+```bash
+python -m unittest discover -s tests -v
+```
+
+---
+
 ## 📂 Dosya Yapısı
 ```text
 ├── src/                # Kaynak kodlar

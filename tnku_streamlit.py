@@ -454,8 +454,10 @@ try:
         import streamlit as _st2
         # Profesör başvurusuysa doçentlik yılını al
         kadro_v    = _st2.session_state.get("v_kadro", "")
-        docent_yil = int(_st2.session_state.get("v_docent_yil", 0) or 0)
-        # Sadece profesör başvurusunda docent_sonrasi hesapla
+        _bsv       = _st2.session_state.get("v_docent_basvuru")
+        docent_yil = _bsv.year if _bsv else 0
+        # Sadece profesör başvurusunda docent_sonrasi hesapla. Yalnızca yıl
+        # bilindiğinden başvuru yılındaki yayınlar temkinli olarak dışarıda kalır.
         def _docent_sonrasi_mi(metin_):
             if kadro_v != "profesor" or docent_yil == 0:
                 return False
@@ -959,14 +961,24 @@ def _aday_olustur() -> t.AdayBilgi:
         faaliyetler=list(st.session_state.faaliyetler),
         doktora_var=bool(st.session_state.get("v_doktora", False)),
         yabanci_dil_puani=float(st.session_state.get("v_ydpuan", 0.0)),
+        ikinci_yabanci_dil_puani=float(st.session_state.get("v_ydpuan2", 0.0)),
         calisma_alani_yabanci_dil_bolumu=bool(st.session_state.get("v_ydbol", False)),
         ornek_ders_basarili=bool(st.session_state.get("v_ornek", False)),
         uak_docent=bool(st.session_state.get("v_uak", False)),
         sifahi_sinav_basarili=bool(st.session_state.get("v_sifahi", False)),
         doktora_sonrasi_ders_yari_yil=int(st.session_state.get("v_ders", 0)),
         docent_sonrasi_sure_yil=float(st.session_state.get("v_docsure", 0.0)),
-        baslica_arastirma_eseri_var=bool(st.session_state.get("v_baslica", False)),
+        docent_basvuru_tarihi=st.session_state.get("v_docent_basvuru"),
+        docent_unvan_tarihi=st.session_state.get("v_docent_unvan"),
+        uak_kriterleri_yeniden_saglandi=bool(
+            st.session_state.get("v_uak_docent_kriteri", False)),
     )
+
+
+def _docent_basvuru_yili() -> int:
+    """Doçentlik başvuru tarihinin yılı (girilmemişse 0)."""
+    d = st.session_state.get("v_docent_basvuru")
+    return d.year if d else 0
 
 
 def _faaliyet_satirlari(kadro_su: str) -> list[dict]:
@@ -990,12 +1002,14 @@ def _faaliyet_satirlari(kadro_su: str) -> list[dict]:
             "Künye":    kunye[:120] if kunye else "—",
             "Adet":     f.adet,
             "Top.Yz.":  f.toplam_yazar if grup in {1, 2, 3} else "-",
-            "Sira":     ("Sor/Sny" if f.sorumlu_veya_senyör else str(f.yazar_sirasi))
+            "Sira":     (str(f.yazar_sirasi) + (" (Sor/Sny)" if f.sorumlu_veya_senyör else ""))
                         if grup in {1, 2, 3} else "-",
             "Q/Pat.":   ek,
             "Puan":     round(p_f, 2),
             "Tur":      "PUAN-1" if p1_f else "PUAN-2",
+            "Tarih":    f.yayin_tarihi.strftime("%d.%m.%Y") if f.yayin_tarihi else "",
             "Doc.Sn.":  "✓" if f.docent_sonrasi else "",
+            "Başlıca":  "★" if f.baslica_eser else "",
         })
     return rows
 
@@ -1049,6 +1063,7 @@ def _kaydet_font(isim: str, dosya: str) -> bool:
 
 
 def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
+    from xml.sax.saxutils import escape as _xml_escape
     buf = io.BytesIO()
 
     # Normal + Bold çiftlerini dene; ilk başarılı çifti kullan
@@ -1131,27 +1146,9 @@ def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
     elems.append(at)
     elems.append(Spacer(1, 10))
 
-    # 5 yıl kriteri kontrolü
-    import datetime as _dt_pdf
-    _p5ok_pdf = True
-    _p5msg_pdf = ""
-    _uak_pdf = True
-    _uak_pdf_msg = ""
-    if hasattr(aday, "_docent_yil") and aday._docent_yil and aday.kadro_turu == "profesor":
-        _gecen_pdf = _dt_pdf.date.today().year - aday._docent_yil
-        if _gecen_pdf < 5:
-            _p5ok_pdf = False
-            _p5msg_pdf = f"Docent unvanindan bu yana {_gecen_pdf} yil gecmistir (en az 5 yil gereklidir)."
-        if not getattr(aday, "_uak_krit_teyit", False):
-            _uak_pdf = False
-            _uak_pdf_msg = (
-                f"Madde 11(b)-2: {aday._docent_yil} donemi UAK docentlik kriterleri "
-                f"docentlik sonrasi calismalarda yeniden saglandigina dair teyit eksik."
-            )
-
-    _ek_ok_pdf = _p5ok_pdf and _uak_pdf
+    # 5 yıl ve Md. 11(2) kontrolleri artık kriter_kontrol() içinde
     gtxt = ("TUM KRITERLER SAGLANIYOR - BASVURU YAPILABILIR"
-            if (genel and _ek_ok_pdf) else
+            if genel else
             "BAZI KRITERLER SAGLANMIYOR - BASVURU YAPILAMAZ")
     gc = colors.HexColor("#1A7A3A") if genel else colors.HexColor("#C0392B")
     gt = Table([[gtxt]], colWidths=[W - 3.6*cm])
@@ -1165,18 +1162,6 @@ def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
         ("BOTTOMPADDING", (0,0), (-1,-1), 10),
     ]))
     elems.append(gt)
-    for _uyari_msg in [
-        _p5msg_pdf if not _p5ok_pdf else "",
-        _uak_pdf_msg if not _uak_pdf else "",
-    ]:
-        if _uyari_msg:
-            elems.append(Spacer(1, 4))
-            elems.append(Paragraph(
-                f"UYARI: {_uyari_msg}",
-                ParagraphStyle("puyari", fontName=fb, fontSize=9, leading=12,
-                               textColor=colors.HexColor("#C0392B"),
-                               backColor=colors.HexColor("#FFEBEE"),
-                               borderPadding=6)))
     elems.append(Spacer(1, 10))
 
     elems.append(Paragraph("PUAN OZETI", s_sec))
@@ -1196,13 +1181,14 @@ def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
     elems.append(Spacer(1, 10))
 
     elems.append(Paragraph("KRITER KONTROL SONUCLARI", s_sec))
+    s_kc = ParagraphStyle("kc", fontName=fr, fontSize=8, leading=10)
     kdata = [["#", "Kriter", "Durum", "Not"]]
     for i, kr in enumerate(sonuc["kriterler"], 1):
         ok = "✓" in kr["durum"]
         kdata.append([
-            str(i), kr["kriter"],
+            str(i), Paragraph(_xml_escape(kr["kriter"]), s_kc),
             "SAGLANIYOR" if ok else "SAGLANMIYOR",
-            kr["notlar"],
+            Paragraph(_xml_escape(kr["notlar"]), s_kc),
         ])
     kts = tbl_style()
     for ri, kr in enumerate(sonuc["kriterler"], 1):
@@ -1217,7 +1203,7 @@ def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
         kts.add("BACKGROUND", (0, ri), (-1, ri), bg)
         kts.add("TEXTCOLOR",  (2, ri), (2, ri),  tc)
         kts.add("FONTNAME",   (2, ri), (2, ri),  fb)
-    kt = Table(kdata, colWidths=[0.7*cm, 9.5*cm, 3*cm, 4.3*cm])
+    kt = Table(kdata, repeatRows=1, colWidths=[0.7*cm, 8.3*cm, 2.6*cm, 5.8*cm])
     kt.setStyle(kts)
     elems.append(kt)
     elems.append(Spacer(1, 10))
@@ -1230,24 +1216,76 @@ def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
     for f in aday.faaliyetler:
         faaliyet_kunye.append(getattr(f, "_kunye", "") or "")
 
-    fdata = [["#", "Kod", "Faaliyet", "Adet", "Puan", "Tür"]]
-    for ri, d in enumerate(pnlar["detaylar"]):
+    def _sayi(x) -> str:
+        """12.50 → 12.5, 50.00 → 50"""
+        return f"{x:.2f}".rstrip("0").rstrip(".")
+
+    s_th   = ParagraphStyle("th", fontName=fb, fontSize=7, leading=8.5,
+                            textColor=colors.white, alignment=1)
+    s_td   = ParagraphStyle("td", fontName=fr, fontSize=7, leading=8.5)
+    s_tdc  = ParagraphStyle("tdc", parent=s_td, alignment=1)
+    s_tdb  = ParagraphStyle("tdb", parent=s_td, fontName=fb, alignment=2)
+
+    basliklar = ["#", "Kod", "Faaliyet", "EK-2 Puanı", "Çarpan", "Tam Puan",
+                 "Yazar Sırası", "Yazar Payı", "Adet", "Hesap. Puan",
+                 "Hak Edilen", "Tür"]
+    fdata = [[Paragraph(b, s_th) for b in basliklar]]
+    for ri, d in enumerate(pnlar["detaylar"], 1):
+        carpan_txt = "<br/>".join(f"{etiket} ×{_sayi(c)}"
+                                  for etiket, c in d["carpanlar"]) or "–"
+        if d["yazar_uygulanir"]:
+            sira_txt = f"{d['yazar_sirasi']}/{d['toplam_yazar']}"
+            if d["sorumlu_veya_senyör"]:
+                sira_txt += " (S)"
+            pay_txt = f"%{_sayi(d['yazar_carpani'] * 100)}"
+        else:
+            sira_txt, pay_txt = "–", "–"
+        hak_txt = _sayi(d["puan"])
+        if d["tavan_kesinti"] > 0:
+            hak_txt += f"<br/><font size=6>(tavan −{_sayi(d['tavan_kesinti'])})</font>"
         fdata.append([
-            str(ri + 1),
-            d["kod"],
-            d["ad"][:60],
-            str(d["adet"]),
-            f"{d['puan']:.2f}",
-            "P-1" if d["puan1_mi"] else "P-2",
+            Paragraph(str(ri), s_tdc),
+            Paragraph(d["kod"], s_tdc),
+            Paragraph(_xml_escape(d["ad"]), s_td),
+            Paragraph(_sayi(d["taban"]), s_tdc),
+            Paragraph(carpan_txt, s_tdc),
+            Paragraph(_sayi(d["tam_puan"]), s_tdc),
+            Paragraph(sira_txt, s_tdc),
+            Paragraph(pay_txt, s_tdc),
+            Paragraph(str(d["adet"]), s_tdc),
+            Paragraph(_sayi(d["ham_puan"]), s_tdc),
+            Paragraph(hak_txt, s_tdb),
+            Paragraph("P-1" if d["puan1_mi"] else "P-2", s_tdc),
         ])
+    ham_toplam = sum(d["ham_puan"] for d in pnlar["detaylar"])
+    fdata.append([
+        "", "", Paragraph("<b>TOPLAM</b>", s_td), "", "", "", "", "", "",
+        Paragraph(f"<b>{_sayi(ham_toplam)}</b>", s_tdc),
+        Paragraph(_sayi(pnlar["toplam"]), s_tdb), "",
+    ])
     fts = tbl_style()
     for ri, d in enumerate(pnlar["detaylar"], 1):
         fts.add("BACKGROUND", (0, ri), (-1, ri),
                 colors.HexColor("#EAF4E8") if d["puan1_mi"]
                 else colors.HexColor("#EAF0FA"))
-    ft = Table(fdata, colWidths=[0.7*cm, 1.2*cm, 9.5*cm, 0.9*cm, 1.4*cm, 1.2*cm])
+    fts.add("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#D6E4F7"))
+    ft = Table(fdata, repeatRows=1,
+               colWidths=[0.6*cm, 1.0*cm, 4.3*cm, 1.1*cm, 1.7*cm, 1.1*cm,
+                          1.2*cm, 1.2*cm, 1.0*cm, 1.7*cm, 1.5*cm, 1.0*cm])
     ft.setStyle(fts)
     elems.append(ft)
+    elems.append(Spacer(1, 4))
+    elems.append(Paragraph(
+        "<b>EK-2 Puanı:</b> yönergedeki faaliyet puanı. "
+        "<b>Çarpan:</b> dergi kuartili (Q1 ×2, Q2 ×1.5, Q3 ×1.25), patent "
+        "durumu, ikinci danışmanlık. "
+        "<b>Tam Puan:</b> EK-2 puanı × çarpanlar. "
+        "<b>Yazar Payı:</b> Madde 8 tablosuna göre yazar sırasının payı "
+        "((S): sorumlu/senyör yazar – puanı değiştirmez). "
+        "<b>Hesap. Puan:</b> tam puan × yazar payı × adet. "
+        "<b>Hak Edilen:</b> grup tavanı (editörlük 40, atıf 50, hakemlik 20, "
+        "panelist 20, kongre 20) uygulandıktan sonra toplama giren puan.",
+        s_xs))
     elems.append(Spacer(1, 10))
 
     # Künye listesi - yapısal, sarma destekli
@@ -1401,38 +1439,49 @@ with tab1:
                          options=[3, 2, 1],
                          format_func=lambda x: f"{x} Yıl")
         if st.session_state.get("v_kadro") == "profesor":
-            st.number_input(
-                "Doçentlik Yılı",
-                min_value=1970, max_value=2030,
-                value=st.session_state.get("v_docent_yil", 2020),
-                step=1, key="v_docent_yil",
-                help="Doçentlik unvanını aldığınız yıl. Yayın yılı bu yıldan "
-                     "sonraysa 'Doçentlik Sonrası' otomatik işaretlenir."
+            _dt1, _dt2c = st.columns(2)
+            with _dt1:
+                st.date_input(
+                    "Doçentlik başvuru tarihi",
+                    value=None, key="v_docent_basvuru",
+                    min_value=datetime.date(1970, 1, 1),
+                    max_value=datetime.date.today(),
+                    format="DD.MM.YYYY",
+                    help="EK-1 (g) ve Md. 11(2) bu tarihten sonraki "
+                         "faaliyetlere bakar."
+                )
+            with _dt2c:
+                st.date_input(
+                    "Doçentlik unvanı tarihi",
+                    value=None, key="v_docent_unvan",
+                    min_value=datetime.date(1970, 1, 1),
+                    max_value=datetime.date.today(),
+                    format="DD.MM.YYYY",
+                    help="5 yıllık yasal süre ve Başlıca Araştırma Eseri "
+                         "(Md. 11(5)) bu tarihe göre denetlenir."
+                )
+            _doc_bsv = st.session_state.get("v_docent_basvuru")
+            _doc_donem = (f"{_doc_bsv:%m.%Y} başvuru dönemi" if _doc_bsv
+                          else "doçentlik başvuru dönemi")
+            st.info(
+                f"📋 **Madde 11(2) Kriteri:**  "
+                f"Doçentlik başvurunuzdaki ({_doc_donem}) "
+                f"ÜAK başvuru kriterlerini **doçentlik başvurusu sonrası** "
+                f"çalışmalarınızla yeniden sağlamış olmanız gerekir "
+                f"(tezden üretilen yayın şartı hariç).",
+                icon="ℹ️"
             )
-            # ÜAK doçentlik kriteri teyidi
-            _doc_yil_v = int(st.session_state.get("v_docent_yil", 0) or 0)
-            if _doc_yil_v > 0:
-                # Doçentlik dönemini tahmin et (Mart veya Ekim)
-                _doc_donem = f"{_doc_yil_v} dönemi"
-                st.info(
-                    f"📋 **Madde 11(b)-2 Kriteri:**  "
-                    f"Doçentlik unvanını aldığınız dönemdeki ({_doc_donem}) "
-                    f"ÜAK başvuru kriterlerini **doçentlik sonrası** "
-                    f"çalışmalarınızla yeniden sağlamış olmanız gerekir "
-                    f"(tezden üretilen yayın şartı hariç).",
-                    icon="ℹ️"
-                )
-                st.markdown(
-                    f"[🔗 ÜAK Doçentlik Başvuru Şartları Arşivi]"
-                    f"(https://www.uak.gov.tr/page/docentlik-basvuru-sartlari-kLPHX)",
-                )
-                st.checkbox(
-                    f"✅ {_doc_yil_v} dönemindeki ÜAK doçentlik kriterlerini "
-                    f"doçentlik sonrası çalışmalarımla yeniden sağladığımı teyit ediyorum "
-                    f"(tezden üretilen yayın hariç).",
-                    key="v_uak_docent_kriteri",
-                    help="Madde 11(b)-2 gereği profesörlük başvurusu için zorunludur."
-                )
+            st.markdown(
+                f"[🔗 ÜAK Doçentlik Başvuru Şartları Arşivi]"
+                f"(https://www.uak.gov.tr/page/docentlik-basvuru-sartlari-kLPHX)",
+            )
+            st.checkbox(
+                f"✅ {_doc_donem} ÜAK doçentlik kriterlerini "
+                f"doçentlik başvurusu sonrası çalışmalarımla yeniden "
+                f"sağladığımı beyan ederim (tezden üretilen yayın hariç).",
+                key="v_uak_docent_kriteri",
+                help="Madde 11(2) gereği profesörlük başvurusu için zorunludur."
+            )
 
     st.divider()
 
@@ -1448,14 +1497,17 @@ with tab1:
                     help="Üniversitelerarası Kuruldan alınmış doçentlik unvanı")
     with gc2:
         st.checkbox("ÜAK sözlü sınavı başarılı", key="v_sifahi",
-                    help="Doçent için zorunlu · Profesör'de işaretlenmezse puan eşikleri %80'e düşer")
+                    help="Doçent için zorunlu · Profesör'de işaretlenmezse örnek ders "
+                         "zorunlu olur ve tüm puan eşikleri %20 artar (Md. 11(1)b)")
         st.checkbox("Örnek ders 'Başarılı'", key="v_ornek",
                     help="Dr. Öğr. Üyesi için zorunlu; sözlü sınavsız Profesör için de zorunlu")
     with gc3:
-        st.checkbox("Başlıca Araştırma Eseri eklendi", key="v_baslica",
-                    help="Prof. başvurusu için zorunlu; doçent sonrası, başlıca yazar")
         st.checkbox("Çalışma alanı yabancı dil bölümü", key="v_ydbol",
-                    help="Bu durumda YÖKDİL/YDS puanı ≥85 aranır")
+                    help="Bu durumda alan dilinden ≥85 ve ikinci yabancı dilden "
+                         "≥60 (Dr.) / ≥65 (Doç./Prof.) aranır")
+        if st.session_state.get("v_kadro") == "profesor":
+            st.caption("Başlıca Araştırma Eseri: Faaliyetler sekmesinde ilgili "
+                       "eserde ★ işaretleyin.")
 
     st.divider()
 
@@ -1464,9 +1516,15 @@ with tab1:
                 unsafe_allow_html=True)
     dl1, dl2, dl3 = st.columns(3, gap="medium")
     with dl1:
-        st.number_input("YÖKDİL / YDS Puanı", key="v_ydpuan",
+        _ydbol = st.session_state.get("v_ydbol", False)
+        st.number_input("YÖKDİL / YDS Puanı" + (" (çalışma alanı dili)" if _ydbol else ""),
+                        key="v_ydpuan",
                         min_value=0.0, max_value=100.0, step=0.5,
                         help="Dr. Öğr. Üyesi ≥60  |  Doçent/Prof. ≥65  |  Yab. Dil Böl. ≥85")
+        if _ydbol:
+            st.number_input("İkinci yabancı dil puanı", key="v_ydpuan2",
+                            min_value=0.0, max_value=100.0, step=0.5,
+                            help="Dr. Öğr. Üyesi ≥60  |  Doçent/Prof. ≥65")
     with dl2:
         st.number_input("Farklı yarıyıl ders sayısı", key="v_ders",
                         min_value=0, max_value=60, step=1,
@@ -1475,19 +1533,19 @@ with tab1:
         st.number_input("Doçent sonrası yükseköğretim süresi (yıl)", key="v_docsure",
                         min_value=0.0, max_value=40.0, step=0.5,
                         help="Prof. için ≥2.5 yıl yükseköğretim, ≥5 yıl doçentlik gerekli")
-        # Doçentlik yılına göre otomatik hesap
+        # Doçentlik unvan tarihine göre 5 yıl bilgisi
         if st.session_state.get("v_kadro") == "profesor":
-            _doc_yil = int(st.session_state.get("v_docent_yil", 0) or 0)
-            if _doc_yil > 0:
-                import datetime as _dt
-                _gecen = _dt.date.today().year - _doc_yil
-                if _gecen < 5:
+            _unvan = st.session_state.get("v_docent_unvan")
+            if _unvan:
+                _dolum = t.yil_ekle(_unvan, t.PROF_ASGARI_SURE_YIL)
+                if datetime.date.today() < _dolum:
                     st.warning(
-                        f"⚠️ Doçentlik üzerinden {_gecen} yıl geçmiş. "
-                        f"Profesör başvurusu için en az **5 yıl** geçmesi gerekir."
+                        f"⚠️ 5 yıllık süre {_dolum:%d.%m.%Y} tarihinde dolar."
                     )
                 else:
-                    st.success(f"✅ Doçentlik üzerinden {_gecen} yıl geçmiş.")
+                    st.success(f"✅ 5 yıllık süre {_dolum:%d.%m.%Y} tarihinde doldu.")
+            else:
+                st.warning("⚠️ Doçentlik unvan tarihini girin.")
 
     st.divider()
 
@@ -1607,7 +1665,12 @@ with tab2:
                     yazar_sirasi = st.number_input("Yazar Sırası", min_value=1,
                                                    max_value=50, value=1, key="v_syazar")
                 with yc3:
-                    sorumlu = st.checkbox("Sorumlu / Senyör", key="v_sorumlu")
+                    sorumlu = st.checkbox(
+                        "Sorumlu / Senyör", key="v_sorumlu",
+                        help="Puanı değiştirmez (Madde 8 yalnızca yazar sırasına "
+                             "bakar). Yalnızca Dr. Öğr. Üyesi EK-1 (b) kuralında "
+                             "kullanılır. Senyör yazar: son isim ve daha önce ≥10 "
+                             "uluslararası yayın.")
 
             q_val: str | None = None
             if bilgi.get("q_carpan"):
@@ -1629,8 +1692,27 @@ with tab2:
                     ikinci_dan = st.checkbox("İkinci Danışman (yarı puan)",
                                              key="v_ikinci")
             with ex2:
-                docsn: bool = st.checkbox("Doçentlik Sonrası Faaliyet",
-                                          key="v_docsn")
+                docsn: bool = st.checkbox(
+                    "Doçentlik Başvurusu Sonrası Faaliyet", key="v_docsn",
+                    help="Yayın tarihi ve doçentlik başvuru tarihi girilmişse "
+                         "tarih karşılaştırması bu işaretin yerine geçer.")
+
+            yayin_t = None
+            baslica = False
+            if st.session_state.get("v_kadro") == "profesor":
+                yt1, yt2 = st.columns(2)
+                with yt1:
+                    yayin_t = st.date_input(
+                        "Yayın / faaliyet tarihi", value=None, key="v_yayin_t",
+                        min_value=datetime.date(1970, 1, 1),
+                        max_value=datetime.date.today(), format="DD.MM.YYYY")
+                with yt2:
+                    if grup_no in {1, 2}:
+                        baslica = st.checkbox(
+                            "★ Başlıca Araştırma Eseri", key="v_baslica_f",
+                            help="Md. 11(5): doçentlik unvanından sonra, ALAN-1 için "
+                                 "1.1; ALAN-2 için 1.1/1.3/1.4/2.1/2.2/2.4; "
+                                 "tek veya ilk yazar. Yayın tarihi zorunludur.")
 
             kunye_giris = st.text_area(
                 "📄 Künye (isteğe bağlı)",
@@ -1646,6 +1728,7 @@ with tab2:
                 sorumlu_veya_senyör=sorumlu, q_degeri=q_val,
                 patent_durum=patent_durum,
                 ikinci_danisман=ikinci_dan, docent_sonrasi=docsn,
+                yayin_tarihi=yayin_t, baslica_eser=baslica,
             )
             p_tmp, _ = t.faaliyet_puan_hesapla(f_tmp)
             p1_mi    = t.is_puan1(secili_kod,
@@ -1673,6 +1756,7 @@ with tab2:
                         sorumlu_veya_senyör=sorumlu, q_degeri=q_val,
                         patent_durum=patent_durum,
                         ikinci_danisман=ikinci_dan, docent_sonrasi=docsn,
+                        yayin_tarihi=yayin_t, baslica_eser=baslica,
                     )
                     _f_yeni._kunye = (kunye_giris or "").strip()
                     st.session_state.faaliyetler.append(_f_yeni)
@@ -1797,17 +1881,31 @@ with tab2:
                         "Sorumlu/Senyör Yazar",
                         value=f_d.sorumlu_veya_senyör, key=f"sor_{didx}")
 
-                # Doçentlik Sonrası - sadece profesör başvurusunda
+                # Doçentlik Sonrası / tarih / başlıca eser - sadece profesör başvurusunda
                 _kadro_sec = st.session_state.get("v_kadro","")
                 yeni_docsn = f_d.docent_sonrasi
+                yeni_yt    = f_d.yayin_tarihi
+                yeni_bsl   = f_d.baslica_eser
                 if _kadro_sec == "profesor":
-                    _doc_yil = int(st.session_state.get("v_docent_yil", 0) or 0)
+                    _doc_yil = _docent_basvuru_yili()
                     _yayin_y = _yayin_yili_bul(getattr(f_d, "_kunye", "") or "")
                     _auto    = (_yayin_y > _doc_yil) if (_doc_yil > 0 and _yayin_y > 0) else f_d.docent_sonrasi
-                    yeni_docsn = st.checkbox(
-                        f"Doçentlik Sonrası Faaliyet"
-                        + (f" (yayın yılı: {_yayin_y})" if _yayin_y else ""),
-                        value=_auto, key=f"dcsn_{didx}")
+                    de1, de2, de3 = st.columns(3)
+                    with de1:
+                        yeni_docsn = st.checkbox(
+                            f"Doçentlik Başvurusu Sonrası"
+                            + (f" (yayın yılı: {_yayin_y})" if _yayin_y else ""),
+                            value=_auto, key=f"dcsn_{didx}")
+                    with de2:
+                        yeni_yt = st.date_input(
+                            "Yayın / faaliyet tarihi", value=f_d.yayin_tarihi,
+                            key=f"yt_{didx}",
+                            min_value=datetime.date(1970, 1, 1),
+                            max_value=datetime.date.today(), format="DD.MM.YYYY")
+                    with de3:
+                        yeni_bsl = st.checkbox(
+                            "★ Başlıca Araştırma Eseri", value=f_d.baslica_eser,
+                            key=f"bsl_{didx}")
 
                 yeni_pd = f_d.patent_durum
                 if yeni_kod in ("11.1", "11.7"):
@@ -1831,6 +1929,8 @@ with tab2:
                         f_d.patent_durum      = yeni_pd
                         f_d._kunye            = yeni_kunye.strip()
                         f_d.docent_sonrasi    = yeni_docsn
+                        f_d.yayin_tarihi      = yeni_yt
+                        f_d.baslica_eser      = yeni_bsl
                         st.rerun()
                 with btn2:
                     if st.button("🗑 Sil", key=f"sil_{didx}",
@@ -1868,38 +1968,8 @@ with bar2:
         if not st.session_state.faaliyetler:
             st.error("Önce en az bir faaliyet ekleyin.")
         else:
-            # Profesör için 5 yıl kriteri kontrolü
-            _kadro_h = st.session_state.get("v_kadro","")
-            _doc_yil_h = int(st.session_state.get("v_docent_yil", 0) or 0)
-            import datetime as _dt2
-            _prof_5yil_ok = True
-            _prof_5yil_mesaj = ""
-            if _kadro_h == "profesor" and _doc_yil_h > 0:
-                _gecen_h = _dt2.date.today().year - _doc_yil_h
-                if _gecen_h < 5:
-                    _prof_5yil_ok = False
-                    _prof_5yil_mesaj = (
-                        f"Doçentlik üzerinden {_gecen_h} yıl geçmiş "
-                        f"(en az 5 yıl gereklidir)."
-                    )
-            # ÜAK Madde 11(b)-2 kriteri teyidi
-            _uak_krit_ok = True
-            _uak_krit_mesaj = ""
-            if _kadro_h == "profesor" and _doc_yil_h > 0:
-                if not st.session_state.get("v_uak_docent_kriteri", False):
-                    _uak_krit_ok = False
-                    _uak_krit_mesaj = (
-                        f"Madde 11(b)-2: {_doc_yil_h} dönemindeki ÜAK doçentlik "
-                        f"kriterlerini yeniden sağladığınızı teyit etmediniz."
-                    )
-            st.session_state["_prof_5yil_ok"]    = _prof_5yil_ok
-            st.session_state["_prof_5yil_mesaj"] = _prof_5yil_mesaj
-            st.session_state["_uak_krit_ok"]     = _uak_krit_ok
-            st.session_state["_uak_krit_mesaj"]  = _uak_krit_mesaj
+            # 5 yıl ve Md. 11(2) kontrolleri kriter_kontrol() içinde yapılır
             aday = _aday_olustur()
-            # Doçentlik yılını adaya ekle (PDF için)
-            aday._docent_yil     = _doc_yil_h
-            aday._uak_krit_teyit = st.session_state.get("v_uak_docent_kriteri", False)
             st.session_state.son_aday = aday
             st.session_state.sonuc    = t.kriter_kontrol(aday)
             st.rerun()
@@ -1929,16 +1999,12 @@ if sonuc is not None and son_aday is not None:
 
     # Profesör için doçentlik sonrası puan özeti
     if son_aday.kadro_turu == "profesor":
-        doc_son_faaliyetler = [f for f in son_aday.faaliyetler if f.docent_sonrasi]
+        doc_son_faaliyetler = [f for f in son_aday.faaliyetler
+                               if t.docent_basvuru_sonrasi_mi(f, son_aday)]
         if doc_son_faaliyetler:
-            from tnku_atama import puan_hesapla as _ph, AdayBilgi as _AB
-            _aday_doc = _AB(
-                ad_soyad=son_aday.ad_soyad,
-                alan=son_aday.alan,
-                kadro_turu="profesor",
-                faaliyetler=doc_son_faaliyetler,
-            )
-            _sonuc_doc = _ph(_aday_doc)
+            import dataclasses as _dc
+            _sonuc_doc = t.puan_hesapla(
+                _dc.replace(son_aday, faaliyetler=doc_son_faaliyetler))
             _p2_doc    = _sonuc_doc.get("puan2", 0)
             _p1_doc    = _sonuc_doc.get("puan1", 0)
             with st.expander(
@@ -1948,9 +2014,9 @@ if sonuc is not None and son_aday is not None:
                 expanded=False
             ):
                 st.caption(
-                    "Madde 11(b)-2 gereği profesörlük için doçentlik sonrası "
+                    "Madde 11(2) gereği profesörlük için doçentlik başvurusu sonrası "
                     "faaliyetleriniz ayrıca aşağıda listelenmiştir. "
-                    "Bu faaliyetlerin doçentlik alındığı dönemin ÜAK kriterlerini "
+                    "Bu faaliyetlerin doçentlik başvuru döneminin ÜAK kriterlerini "
                     "karşılaması gerekmektedir."
                 )
                 st.markdown(
@@ -1975,9 +2041,9 @@ if sonuc is not None and son_aday is not None:
 
                 _uak_teyit = st.session_state.get("v_uak_docent_kriteri", False)
                 if _uak_teyit:
-                    st.success("✅ ÜAK Madde 11(b)-2 kriteri teyit edilmiştir.")
+                    st.success("✅ ÜAK Madde 11(2) kriteri beyan edilmiştir.")
                 else:
-                    st.warning("⚠️ ÜAK Madde 11(b)-2 kriteri henüz teyit edilmemiştir.")
+                    st.warning("⚠️ ÜAK Madde 11(2) kriteri henüz beyan edilmemiştir.")
 
     pnlar = sonuc["puanlar"]
     genel = sonuc["genel_sonuc"]
@@ -1990,27 +2056,11 @@ if sonuc is not None and son_aday is not None:
     }.get(son_aday.kadro_turu, "–")
 
     # ── Sonuç bandı ──────────────────────────────────────────────────────────
-    # Ek kriterler (Profesörlük)
-    _p5ok   = st.session_state.get("_prof_5yil_ok", True)
-    _p5msg  = st.session_state.get("_prof_5yil_mesaj", "")
-    _uakok  = st.session_state.get("_uak_krit_ok", True)
-    _uakmsg = st.session_state.get("_uak_krit_mesaj", "")
-
-    if not _p5ok:
-        st.error(f"⛔ 5 YIL KRİTERİ: {_p5msg}")
-    if not _uakok:
-        st.warning(f"⚠️ ÜAK MADDESİ 11(b)-2: {_uakmsg}")
-        st.markdown(
-            "[🔗 ÜAK Doçentlik Başvuru Şartları Arşivi]"
-            "(https://www.uak.gov.tr/page/docentlik-basvuru-sartlari-kLPHX)"
-        )
-
-    _ek_ok = _p5ok and _uakok
-    ikon  = "✅" if (genel and _ek_ok) else "❌"
+    ikon  = "✅" if genel else "❌"
     gtxt  = ("TÜM KRİTERLER SAĞLANIYOR – BAŞVURU YAPILABİLİR"
-             if (genel and _ek_ok) else
+             if genel else
              "BAZI KRİTERLER SAĞLANMIYOR – BAŞVURU YAPILAMAZ")
-    cls   = "sonuc-ok" if (genel and _ek_ok) else "sonuc-fail"
+    cls   = "sonuc-ok" if genel else "sonuc-fail"
     st.markdown(f'<div class="{cls}">{ikon}  {gtxt}</div>',
                 unsafe_allow_html=True)
 
