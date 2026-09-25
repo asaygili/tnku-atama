@@ -29,6 +29,16 @@ Akademik kadro başvurularında (Doktor Öğretim Üyesi, Doçent, Profesör) ad
 
 ---
 
+## 📑 ÜAK Doçentlik Kriterleri (Profesörlük Md. 11(2))
+Profesörlük başvurusunda, doçentlik başvuru dönemindeki ÜAK kriterlerinin doçentlik başvurusu sonrası çalışmalarla yeniden sağlanması gerekir. **Aday Bilgileri → Doçentlik başvurusundaki ÜAK kriteri** alanından dönem seçildiğinde, doçentlik başvurusu sonrası faaliyetler ÜAK tablosuna göre otomatik puanlanır. Lisansüstü tezlerden üretilmiş yayın şartı profesörlükte aranmaz. Sonuç ekranda ve PDF'te bölüm bölüm gösterilir.
+
+Tanımlı kriter setleri:
+* ÜAK Mart 2022 – Mühendislik (Tablo 9, koşul 91)
+
+**Yeni dönem / temel alan eklemek:** `uak_kriterleri/mart_2022.py` örnek alınarak `uak_kriterleri/` klasöründe bir `KriterSeti` tanımlanır ve `kaydet()` ile kaydedilir. Yeni dosya ise `uak_kriterleri/__init__.py` dosyasının en altındaki içe aktarma listesine eklenir. Her kalemde puan, eşlenen EK-2 kodları, tezden üretilmiş olma koşulu ve yazar paylaşım kuralı; her bölümde asgari/azami puan ve özel koşullar veri olarak yazılır, hesaplama koduna dokunulmaz.
+
+---
+
 ## ✅ Testler
 Yönerge kurallarının (Madde 8, Madde 11, EK-1) doğru uygulandığını denetleyen testler `tests/` klasöründedir. Ek kurulum gerektirmez:
 ```bash
