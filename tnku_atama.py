@@ -635,43 +635,71 @@ def q_carpan_al(q: Optional[str]) -> float:
     return carpanlar.get(q or "Q4", 1.0)
 
 
+def puan_dokumu(f: Faaliyet) -> dict:
+    """
+    Bir faaliyetin puanının adım adım dökümünü döndürür (grup tavanı hariç):
+
+      taban       EK-2'deki puan
+      carpanlar   [(etiket, değer), ...] – Q, patent durumu, 2. danışman
+      tam_puan    taban × çarpanlar (tek yazarlı eserin alacağı puan)
+      yazar_carpani  Madde 8 payı (yayın grupları 1-3 dışında 1.0)
+      birim_puan  tam_puan × yazar_carpani
+      ham_puan    birim_puan × adet
+    """
+    bilgi = EK2_PUANLAR[f.kod]
+    taban = bilgi["taban"]
+    carpanlar: list[tuple[str, float]] = []
+
+    # Q çarpanı
+    if bilgi["q_carpan"] and f.q_degeri:
+        carpanlar.append((f.q_degeri, q_carpan_al(f.q_degeri)))
+
+    # Patent durumu çarpanı (11.1 ve 11.7)
+    if f.kod in ("11.1", "11.7") and f.patent_durum:
+        if f.patent_durum == "arastirma_raporu":
+            carpanlar.append(("Araştırma raporu", 0.5))
+        elif f.patent_durum == "basvuru":
+            carpanlar.append(("Başvuru", 0.25))
+
+    # İkinci danışman çarpanı (17.1, 17.2)
+    if f.kod in ("17.1", "17.2") and f.ikinci_danisман:
+        carpanlar.append(("2. danışman", 0.5))
+
+    # Tez jürisi: Yüksek lisansta yarı puan (17.3)
+    # (kullanıcı adet ile girebilir; burada otomatik yarı yapmıyoruz,
+    #  kullanıcı bilinçli girmeli)
+
+    tam_puan = taban
+    for _, c in carpanlar:
+        tam_puan *= c
+
+    # Yazar çarpanı (yayınlar için)
+    yazar_uygulanir = f.toplam_yazar > 0 and bilgi["grup"] in {1, 2, 3}
+    yazar_carpani = (yazar_carpani_hesapla(f.toplam_yazar, f.yazar_sirasi)
+                     if yazar_uygulanir else 1.0)
+    birim_puan = tam_puan * yazar_carpani
+
+    return {
+        "taban":           taban,
+        "carpanlar":       carpanlar,
+        "tam_puan":        round(tam_puan, 2),
+        "yazar_uygulanir": yazar_uygulanir,
+        "yazar_carpani":   yazar_carpani,
+        "birim_puan":      round(birim_puan, 2),
+        "ham_puan":        round(birim_puan * f.adet, 2),
+    }
+
+
 def faaliyet_puan_hesapla(f: Faaliyet) -> tuple[float, bool]:
     """
-    Faaliyetin toplam puanını hesaplar.
+    Faaliyetin toplam puanını hesaplar (grup tavanı hariç).
     Döndürür: (puan, puan1_mi)
     puan1_mi → bu faaliyet PUAN-1 kapsamında mı?
     """
     if f.kod not in EK2_PUANLAR:
         return 0.0, False
 
-    bilgi = EK2_PUANLAR[f.kod]
-    taban = bilgi["taban"]
-    grup = bilgi["grup"]
-
-    # Q çarpanı
-    if bilgi["q_carpan"] and f.q_degeri:
-        taban = taban * q_carpan_al(f.q_degeri)
-
-    # Patent durumu çarpanı (11.1 ve 11.7)
-    if f.kod in ("11.1", "11.7") and f.patent_durum:
-        if f.patent_durum == "arastirma_raporu":
-            taban = taban * 0.5
-        elif f.patent_durum == "basvuru":
-            taban = taban * 0.25
-
-    # İkinci danışman çarpanı (17.1, 17.2)
-    if f.kod in ("17.1", "17.2") and f.ikinci_danisман:
-        taban = taban * 0.5
-
-    # Tez jürisi: Yüksek lisansta yarı puan (17.3)
-    # (kullanıcı adet ile girebilir; burada otomatik yarı yapmıyoruz,
-    #  kullanıcı bilinçli girmeli)
-
-    # Yazar çarpanı (yayınlar için)
-    if f.toplam_yazar > 0 and grup in {1, 2, 3}:
-        taban = taban * yazar_carpani_hesapla(f.toplam_yazar, f.yazar_sirasi)
-
-    puan = taban * f.adet
+    puan = puan_dokumu(f)["ham_puan"]
 
     # Genel "P1 adayı mı?" işareti: en geniş P1 kümesine (dr_yeniden) göre
     # Gerçek kadro bazlı ayrım için is_puan1() / puan_hesapla() kullanın.
@@ -791,9 +819,10 @@ def puan_hesapla(aday: AdayBilgi) -> dict:
     detaylar = []
 
     for f in aday.faaliyetler:
-        p, _ = faaliyet_puan_hesapla(f)
         if f.kod not in EK2_PUANLAR:
             continue
+        dokum    = puan_dokumu(f)
+        p        = dokum["ham_puan"]
         bilgi    = EK2_PUANLAR[f.kod]
         grup     = bilgi["grup"]
         max_grup = bilgi.get("max_grup")
@@ -828,7 +857,14 @@ def puan_hesapla(aday: AdayBilgi) -> dict:
 
         detaylar.append({
             "kod": f.kod, "ad": bilgi["ad"], "adet": f.adet,
-            "puan": p, "puan1_mi": puan1_mi,
+            "puan": p,                     # hak edilen (grup tavanı sonrası)
+            "puan1_mi": puan1_mi,
+            "toplam_yazar": f.toplam_yazar,
+            "yazar_sirasi": f.yazar_sirasi,
+            "sorumlu_veya_senyör": f.sorumlu_veya_senyör,
+            "max_grup": max_grup,
+            "tavan_kesinti": round(dokum["ham_puan"] - p, 2),
+            **dokum,
         })
 
     return {

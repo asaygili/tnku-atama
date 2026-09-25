@@ -1063,6 +1063,7 @@ def _kaydet_font(isim: str, dosya: str) -> bool:
 
 
 def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
+    from xml.sax.saxutils import escape as _xml_escape
     buf = io.BytesIO()
 
     # Normal + Bold çiftlerini dene; ilk başarılı çifti kullan
@@ -1180,13 +1181,14 @@ def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
     elems.append(Spacer(1, 10))
 
     elems.append(Paragraph("KRITER KONTROL SONUCLARI", s_sec))
+    s_kc = ParagraphStyle("kc", fontName=fr, fontSize=8, leading=10)
     kdata = [["#", "Kriter", "Durum", "Not"]]
     for i, kr in enumerate(sonuc["kriterler"], 1):
         ok = "✓" in kr["durum"]
         kdata.append([
-            str(i), kr["kriter"],
+            str(i), Paragraph(_xml_escape(kr["kriter"]), s_kc),
             "SAGLANIYOR" if ok else "SAGLANMIYOR",
-            kr["notlar"],
+            Paragraph(_xml_escape(kr["notlar"]), s_kc),
         ])
     kts = tbl_style()
     for ri, kr in enumerate(sonuc["kriterler"], 1):
@@ -1201,7 +1203,7 @@ def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
         kts.add("BACKGROUND", (0, ri), (-1, ri), bg)
         kts.add("TEXTCOLOR",  (2, ri), (2, ri),  tc)
         kts.add("FONTNAME",   (2, ri), (2, ri),  fb)
-    kt = Table(kdata, colWidths=[0.7*cm, 9.5*cm, 3*cm, 4.3*cm])
+    kt = Table(kdata, repeatRows=1, colWidths=[0.7*cm, 8.3*cm, 2.6*cm, 5.8*cm])
     kt.setStyle(kts)
     elems.append(kt)
     elems.append(Spacer(1, 10))
@@ -1214,24 +1216,76 @@ def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
     for f in aday.faaliyetler:
         faaliyet_kunye.append(getattr(f, "_kunye", "") or "")
 
-    fdata = [["#", "Kod", "Faaliyet", "Adet", "Puan", "Tür"]]
-    for ri, d in enumerate(pnlar["detaylar"]):
+    def _sayi(x) -> str:
+        """12.50 → 12.5, 50.00 → 50"""
+        return f"{x:.2f}".rstrip("0").rstrip(".")
+
+    s_th   = ParagraphStyle("th", fontName=fb, fontSize=7, leading=8.5,
+                            textColor=colors.white, alignment=1)
+    s_td   = ParagraphStyle("td", fontName=fr, fontSize=7, leading=8.5)
+    s_tdc  = ParagraphStyle("tdc", parent=s_td, alignment=1)
+    s_tdb  = ParagraphStyle("tdb", parent=s_td, fontName=fb, alignment=2)
+
+    basliklar = ["#", "Kod", "Faaliyet", "EK-2 Puanı", "Çarpan", "Tam Puan",
+                 "Yazar Sırası", "Yazar Payı", "Adet", "Hesap. Puan",
+                 "Hak Edilen", "Tür"]
+    fdata = [[Paragraph(b, s_th) for b in basliklar]]
+    for ri, d in enumerate(pnlar["detaylar"], 1):
+        carpan_txt = "<br/>".join(f"{etiket} ×{_sayi(c)}"
+                                  for etiket, c in d["carpanlar"]) or "–"
+        if d["yazar_uygulanir"]:
+            sira_txt = f"{d['yazar_sirasi']}/{d['toplam_yazar']}"
+            if d["sorumlu_veya_senyör"]:
+                sira_txt += " (S)"
+            pay_txt = f"%{_sayi(d['yazar_carpani'] * 100)}"
+        else:
+            sira_txt, pay_txt = "–", "–"
+        hak_txt = _sayi(d["puan"])
+        if d["tavan_kesinti"] > 0:
+            hak_txt += f"<br/><font size=6>(tavan −{_sayi(d['tavan_kesinti'])})</font>"
         fdata.append([
-            str(ri + 1),
-            d["kod"],
-            d["ad"][:60],
-            str(d["adet"]),
-            f"{d['puan']:.2f}",
-            "P-1" if d["puan1_mi"] else "P-2",
+            Paragraph(str(ri), s_tdc),
+            Paragraph(d["kod"], s_tdc),
+            Paragraph(_xml_escape(d["ad"]), s_td),
+            Paragraph(_sayi(d["taban"]), s_tdc),
+            Paragraph(carpan_txt, s_tdc),
+            Paragraph(_sayi(d["tam_puan"]), s_tdc),
+            Paragraph(sira_txt, s_tdc),
+            Paragraph(pay_txt, s_tdc),
+            Paragraph(str(d["adet"]), s_tdc),
+            Paragraph(_sayi(d["ham_puan"]), s_tdc),
+            Paragraph(hak_txt, s_tdb),
+            Paragraph("P-1" if d["puan1_mi"] else "P-2", s_tdc),
         ])
+    ham_toplam = sum(d["ham_puan"] for d in pnlar["detaylar"])
+    fdata.append([
+        "", "", Paragraph("<b>TOPLAM</b>", s_td), "", "", "", "", "", "",
+        Paragraph(f"<b>{_sayi(ham_toplam)}</b>", s_tdc),
+        Paragraph(_sayi(pnlar["toplam"]), s_tdb), "",
+    ])
     fts = tbl_style()
     for ri, d in enumerate(pnlar["detaylar"], 1):
         fts.add("BACKGROUND", (0, ri), (-1, ri),
                 colors.HexColor("#EAF4E8") if d["puan1_mi"]
                 else colors.HexColor("#EAF0FA"))
-    ft = Table(fdata, colWidths=[0.7*cm, 1.2*cm, 9.5*cm, 0.9*cm, 1.4*cm, 1.2*cm])
+    fts.add("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#D6E4F7"))
+    ft = Table(fdata, repeatRows=1,
+               colWidths=[0.6*cm, 1.0*cm, 4.3*cm, 1.1*cm, 1.7*cm, 1.1*cm,
+                          1.2*cm, 1.2*cm, 1.0*cm, 1.7*cm, 1.5*cm, 1.0*cm])
     ft.setStyle(fts)
     elems.append(ft)
+    elems.append(Spacer(1, 4))
+    elems.append(Paragraph(
+        "<b>EK-2 Puanı:</b> yönergedeki faaliyet puanı. "
+        "<b>Çarpan:</b> dergi kuartili (Q1 ×2, Q2 ×1.5, Q3 ×1.25), patent "
+        "durumu, ikinci danışmanlık. "
+        "<b>Tam Puan:</b> EK-2 puanı × çarpanlar. "
+        "<b>Yazar Payı:</b> Madde 8 tablosuna göre yazar sırasının payı "
+        "((S): sorumlu/senyör yazar – puanı değiştirmez). "
+        "<b>Hesap. Puan:</b> tam puan × yazar payı × adet. "
+        "<b>Hak Edilen:</b> grup tavanı (editörlük 40, atıf 50, hakemlik 20, "
+        "panelist 20, kongre 20) uygulandıktan sonra toplama giren puan.",
+        s_xs))
     elems.append(Spacer(1, 10))
 
     # Künye listesi - yapısal, sarma destekli

@@ -245,5 +245,40 @@ class YabanciDil(unittest.TestCase):
         self.assertFalse(saglaniyor(aday, "YÖKDİL/YDS) ≥65"))
 
 
+# ─ Puan dökümü (PDF faaliyet tablosu) ────────────────────────────────────
+class PuanDokumu(unittest.TestCase):
+    def test_makale_dokumu(self):
+        d = t.puan_dokumu(F("1.1", adet=2, toplam_yazar=5, yazar_sirasi=3,
+                            q_degeri="Q2"))
+        self.assertEqual(d["taban"], 25)
+        self.assertEqual(d["carpanlar"], [("Q2", 1.5)])
+        self.assertEqual(d["tam_puan"], 37.5)
+        self.assertEqual(d["yazar_carpani"], 0.6)
+        self.assertEqual(d["birim_puan"], 22.5)
+        self.assertEqual(d["ham_puan"], 45)
+
+    def test_yayin_disi_faaliyette_yazar_payi_uygulanmaz(self):
+        d = t.puan_dokumu(F("12.1", toplam_yazar=4, yazar_sirasi=4))
+        self.assertFalse(d["yazar_uygulanir"])
+        self.assertEqual(d["ham_puan"], 50)
+
+    def test_patent_ve_danisman_carpanlari(self):
+        self.assertEqual(t.puan_dokumu(F("11.1", patent_durum="basvuru"))["carpanlar"],
+                         [("Başvuru", 0.25)])
+        d = t.puan_dokumu(F("17.1", ikinci_danisман=True))
+        self.assertEqual((d["carpanlar"], d["tam_puan"]), ([("2. danışman", 0.5)], 6))
+
+    def test_detaylarda_tavan_kesintisi(self):
+        aday = t.AdayBilgi(kadro_turu="profesor", faaliyetler=[
+            F("5.1", adet=8), F("5.2", adet=5)])      # 40 + 15 ham, tavan 50
+        dt = t.puan_hesapla(aday)["detaylar"]
+        self.assertEqual([(d["ham_puan"], d["puan"], d["tavan_kesinti"]) for d in dt],
+                         [(40, 40, 0), (15, 10, 5)])
+
+    def test_dokum_ile_faaliyet_puani_ayni(self):
+        f = F("1.3", adet=3, toplam_yazar=7, yazar_sirasi=7, q_degeri="Q3")
+        self.assertEqual(t.faaliyet_puan_hesapla(f)[0], t.puan_dokumu(f)["ham_puan"])
+
+
 if __name__ == "__main__":
     unittest.main()
