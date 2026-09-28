@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.part
+# Kişisel veriler repoya girmez
+aday.json
+aday.json.bak
+_eslestirme_kurallari.json

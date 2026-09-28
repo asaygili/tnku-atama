@@ -637,6 +637,9 @@ class Faaliyet:
     uak_baslica_yazar: Optional[bool] = None
     # AVES'teki bölüm ve sıra (UM01, UB03 …) – kanıt klasörü adlarıyla aynı
     aves_kod: str = ""
+    # Kanıt klasörüyle eşleştirme için değişmeyen kimlik:
+    # "doi:…", "baslik:…" (başlık+yıl izi) ya da "klasor:<arşivdeki yol>"
+    kimlik: str = ""
 
 
 def q_carpan_al(q: Optional[str]) -> float:

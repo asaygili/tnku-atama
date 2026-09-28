@@ -18,6 +18,8 @@ import streamlit.components.v1 as components
 import tnku_atama as t
 import uak_kriterleri as uak
 import aves_yardimci as ay
+import kanit.ortak as ko
+import kanit_arayuz as ka
 
 
 # ── AVES Otomatik Yükleme ────────────────────────────────────────────────────
@@ -492,6 +494,10 @@ try:
                                   o.get("metin", "")[:120]))
             return [(ay.aves_kodu(kat_key, baslangic + sira), o) for sira, o in kalan]
 
+        def _kimlik(o, aves_kod):
+            """Kanıt klasörüyle eşleşen değişmeyen kimlik (DOI ya da tür+başlık+yıl izi)."""
+            return ko.birincil_kimlik(ko.doi_bul(o.get("link", "")), o.get("metin", ""), aves_kod)
+
         # 1. Makaleler
         for kat_key in ("ulusl_makale", "ulusal_makale"):
             blok = veri.get(kat_key)
@@ -516,7 +522,7 @@ try:
                     toplam_yazar=toplam, yazar_sirasi=si,
                     sorumlu_veya_senyör=sorumlu, q_degeri=q,
                     docent_sonrasi=_docent_sonrasi_mi(metin),
-                    aves_kod=aves_kod,
+                    aves_kod=aves_kod, kimlik=_kimlik(o, aves_kod),
                 )
                 f_obj._kunye = metin[:300]
                 ekle(f_obj)
@@ -533,7 +539,7 @@ try:
                                 toplam_yazar=toplam, yazar_sirasi=si,
                                 sorumlu_veya_senyör=sorumlu,
                                 docent_sonrasi=_docent_sonrasi_mi(metin),
-                                aves_kod=aves_kod)
+                                aves_kod=aves_kod, kimlik=_kimlik(o, aves_kod))
                 f_obj2._kunye = metin[:300]
                 ekle(f_obj2)
 
@@ -551,8 +557,8 @@ try:
                 f_obj3 = t.Faaliyet(kod=kod, adet=1,
                                 toplam_yazar=toplam, yazar_sirasi=si,
                                 docent_sonrasi=_docent_sonrasi_mi(metin),
-                                aves_kod=aves_kod)
-                f_obj3._kunye = metin[:300]
+                                aves_kod=aves_kod, kimlik=_kimlik(o, aves_kod))
+                f_obj3._kunye = o.get("metin", "")[:300]
                 ekle(f_obj3)
 
         # 5. Atıf (Scholar)
@@ -921,6 +927,8 @@ if "sonuc" not in st.session_state:
     st.session_state.sonuc = None
 if "son_aday" not in st.session_state:
     st.session_state.son_aday = None
+# Kanıt klasöründe kayıtlı aday dosyası varsa ilk açılışta yükle (yalnızca yerelde)
+ka.otomatik_yukle()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Sabitler
@@ -1023,6 +1031,7 @@ def _docent_basvuru_yili() -> int:
 def _faaliyet_satirlari(kadro_su: str) -> list[dict]:
     rows = []
     kset = _uak_seti()
+    _arsiv = ka.arsiv()
     for i, f in enumerate(st.session_state.faaliyetler):
         bilgi_f = t.EK2_PUANLAR.get(f.kod, {})
         p_f, _  = t.faaliyet_puan_hesapla(f)
@@ -1051,6 +1060,7 @@ def _faaliyet_satirlari(kadro_su: str) -> list[dict]:
             "Tarih":    f.yayin_tarihi.strftime("%d.%m.%Y") if f.yayin_tarihi else "",
             "Doc.Sn.":  "✓" if f.docent_sonrasi else "",
             "Başlıca":  "★" if f.baslica_eser else "",
+            **ka.tablo_sutunlari(f, _arsiv),
         })
         if kset:
             bk = uak.kalem_bul(kset, f)
@@ -1485,6 +1495,7 @@ tab1, tab2 = st.tabs([
 
 # ═══════════════════════════════════════ TAB 1 – ADAY BİLGİLERİ ══════════════
 with tab1:
+    ka.kanit_bolumu(_aday_olustur)
 
     # ── 1. Ad Soyad + AVES URL ───────────────────────────────────────────────
     st.markdown('<div class="card-title">KİMLİK BİLGİLERİ</div>',
@@ -1662,6 +1673,7 @@ with tab1:
     aves_url_v  = st.session_state.get("v_aves_url", "")
     aves_isim_v = st.session_state.get("v_ad", "")
 
+    ka.aves_klasor_islemleri(ka.arsiv(), st.session_state.faaliyetler)
     for _tekrar, _tutulan, _kunye in st.session_state.get("_aves_tekrarlar", []):
         st.warning(f"⚠️ **{_tekrar}**, AVES'te **{_tutulan}** ile aynı eser olarak "
                    f"kayıtlı; yalnızca {_tutulan} alındı (her eser bir kez puanlanır). "
@@ -1952,6 +1964,7 @@ with tab2:
         st.divider()
 
         # Her faaliyet için expander: tek tıkla açılır, içinde form
+        _arsiv_d = ka.arsiv()
         for didx, f_d in enumerate(st.session_state.faaliyetler):
             bilgi_d    = t.EK2_PUANLAR.get(f_d.kod, {})
             bilgi_d_ad = bilgi_d.get("ad", "")
@@ -2071,6 +2084,8 @@ with tab2:
                             f_d.patent_durum or "tescilli"),
                         horizontal=True, key=f"pd_{didx}")
 
+                yeni_kimlik = ka.kanit_paneli(f_d, didx, _arsiv_d)
+
                 btn1, btn2 = st.columns(2)
                 with btn1:
                     if st.button("💾 Kaydet", key=f"kyt_{didx}",
@@ -2088,6 +2103,7 @@ with tab2:
                         f_d.baslica_eser      = yeni_bsl
                         f_d.tezden_uretilmis  = yeni_tez
                         f_d.uak_baslica_yazar = yeni_uakbsl
+                        f_d.kimlik            = yeni_kimlik
                         st.rerun()
                 with btn2:
                     if st.button("🗑 Sil", key=f"sil_{didx}",
