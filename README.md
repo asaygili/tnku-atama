@@ -29,6 +29,21 @@ Akademik kadro başvurularında (Doktor Öğretim Üyesi, Doçent, Profesör) ad
 
 ---
 
+## 🔢 AVES Kodları
+AVES'ten aktarılan her faaliyet, AVES'teki bölümünü ve sırasını gösteren bir kod alır. Bu kod faaliyet tablosunda (**AVES** sütunu) ve PDF raporunda (**#** sütunu) görünür; kanıt klasörleri de aynı kodlarla adlandırılabilir.
+
+| Kod | Anlamı |
+|---|---|
+| UM | Uluslararası hakemli dergi makalesi |
+| UL | Ulusal hakemli dergi makalesi |
+| KB | Kitap / kitap bölümü |
+| UB | Uluslararası bildiri |
+| NB | Ulusal bildiri |
+
+Sayı, AVES'teki sıradır (UM01 = AVES'teki ilk uluslararası makale). AVES'te aynı eser iki kez kayıtlıysa (aynı başlık, yıl ve sayfa) yalnızca bir kez alınır ve uyarı gösterilir. Künyesinde "Bölüm:" geçen kayıtlar kitap bölümü (EK-2 2.5 / 2.6) olarak aktarılır.
+
+---
+
 ## 📑 ÜAK Doçentlik Kriterleri (Profesörlük Md. 11(2))
 Profesörlük başvurusunda, doçentlik başvuru dönemindeki ÜAK kriterlerinin doçentlik başvurusu sonrası çalışmalarla yeniden sağlanması gerekir. **Aday Bilgileri → Doçentlik başvurusundaki ÜAK kriteri** alanından dönem seçildiğinde, doçentlik başvurusu sonrası faaliyetler ÜAK tablosuna göre otomatik puanlanır. Lisansüstü tezlerden üretilmiş yayın şartı profesörlükte aranmaz. Sonuç ekranda ve PDF'te bölüm bölüm gösterilir.
 

@@ -635,6 +635,8 @@ class Faaliyet:
     # ÜAK tanımıyla başlıca yazar (tek yazar ya da danışmanı olduğu öğrenciyle):
     # True → aday başlıca yazar, False → başka bir yazar başlıca, None → belirtilmemiş
     uak_baslica_yazar: Optional[bool] = None
+    # AVES'teki bölüm ve sıra (UM01, UB03 …) – kanıt klasörü adlarıyla aynı
+    aves_kod: str = ""
 
 
 def q_carpan_al(q: Optional[str]) -> float:
@@ -866,6 +868,7 @@ def puan_hesapla(aday: AdayBilgi) -> dict:
 
         detaylar.append({
             "kod": f.kod, "ad": bilgi["ad"], "adet": f.adet,
+            "aves_kod": getattr(f, "aves_kod", ""),
             "puan": p,                     # hak edilen (grup tavanı sonrası)
             "puan1_mi": puan1_mi,
             "toplam_yazar": f.toplam_yazar,

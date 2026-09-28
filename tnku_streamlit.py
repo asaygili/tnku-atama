@@ -17,6 +17,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 import tnku_atama as t
 import uak_kriterleri as uak
+import aves_yardimci as ay
 
 
 # ── AVES Otomatik Yükleme ────────────────────────────────────────────────────
@@ -357,12 +358,15 @@ try:
                               for s in td.find_all("span", class_="label-info")]
                     tip    = next((s.get_text(strip=True)
                                    for s in td.find_all("span", class_="label-warning")), "")
+                    a_link = td.find("a", href=True)
+                    link   = a_link["href"] if a_link else ""
                     td_c   = _copy.copy(td)
                     for tag in td_c.find_all(["span","a"]):
                         tag.extract()
                     metin  = td_c.get_text(separator=" ", strip=True)
                     if metin and len(metin) > 5:
-                        ogeler.append({"metin": metin, "endeks": endeks, "tip": tip})
+                        ogeler.append({"metin": metin, "endeks": endeks, "tip": tip,
+                                       "link": link})
                 if ogeler:
                     sonuc[key] = {"baslik": baslik, "sayi": len(ogeler), "ogeler": ogeler}
             return sonuc
@@ -472,12 +476,27 @@ try:
 
         faaliyetler = []
         ekle = faaliyetler.append
+        tekrarlar = []                 # AVES'te iki kez kayıtlı olup ayıklanan eserler
+        onek_sayac: dict[str, int] = {}  # KB gibi birden çok bölüme yayılan önekler
+
+        def _ogeler(kat_key, blok):
+            """Tekrarları ayıklanmış (AVES kodu, öğe) listesi."""
+            onek = ay.AVES_ONEK.get(kat_key, "")
+            baslangic = onek_sayac.get(onek, 0)
+            ogeler = blok.get("ogeler", [])
+            onek_sayac[onek] = baslangic + len(ogeler)
+            kalan, atilan = ay.tekrarlari_ayikla(ogeler)
+            for sira, o, tutulan in atilan:
+                tekrarlar.append((ay.aves_kodu(kat_key, baslangic + sira),
+                                  ay.aves_kodu(kat_key, baslangic + tutulan),
+                                  o.get("metin", "")[:120]))
+            return [(ay.aves_kodu(kat_key, baslangic + sira), o) for sira, o in kalan]
 
         # 1. Makaleler
         for kat_key in ("ulusl_makale", "ulusal_makale"):
             blok = veri.get(kat_key)
             if not blok: continue
-            for o in blok.get("ogeler", []):
+            for aves_kod, o in _ogeler(kat_key, blok):
                 metin  = o.get("metin", "")
                 endeks = o.get("endeks", []) or []
                 si, toplam, sorumlu = _yazar_sirasi_bul(metin, isim)
@@ -497,25 +516,24 @@ try:
                     toplam_yazar=toplam, yazar_sirasi=si,
                     sorumlu_veya_senyör=sorumlu, q_degeri=q,
                     docent_sonrasi=_docent_sonrasi_mi(metin),
+                    aves_kod=aves_kod,
                 )
                 f_obj._kunye = metin[:300]
                 ekle(f_obj)
 
-        # 2. Kitap / Bölüm
+        # 2. Kitap / Bölüm ("Uluslararası Kitaplar veya Kitap Bölümleri" ikisini de içerir)
         for kat_key in ("kitap_ulusl","kitap_ulusal","kitap_bolum"):
             blok = veri.get(kat_key)
             if not blok: continue
-            for o in blok.get("ogeler", []):
+            for aves_kod, o in _ogeler(kat_key, blok):
                 metin = o.get("metin","")
-                if "ulusl" in kat_key:
-                    kod = "2.4" if "bölüm" in kat_key else "2.2"
-                else:
-                    kod = "2.6" if "bölüm" in kat_key else "2.3"
+                kod = ay.kitap_ek2_kodu(kat_key, metin)
                 si, toplam, sorumlu = _yazar_sirasi_bul(metin, isim)
                 f_obj2 = t.Faaliyet(kod=kod, adet=1,
                                 toplam_yazar=toplam, yazar_sirasi=si,
                                 sorumlu_veya_senyör=sorumlu,
-                                docent_sonrasi=_docent_sonrasi_mi(metin))
+                                docent_sonrasi=_docent_sonrasi_mi(metin),
+                                aves_kod=aves_kod)
                 f_obj2._kunye = metin[:300]
                 ekle(f_obj2)
 
@@ -523,7 +541,7 @@ try:
         for kat_key, ulusl in [("ulusl_bildiri",True),("ulusal_bildiri",False)]:
             blok = veri.get(kat_key)
             if not blok: continue
-            for o in blok.get("ogeler", []):
+            for aves_kod, o in _ogeler(kat_key, blok):
                 metin = o.get("metin","").lower()
                 if ulusl:
                     kod = "3.3" if "özet" in metin or "abstract" in metin else                           "3.4" if "poster" in metin else "3.2"
@@ -532,7 +550,8 @@ try:
                 si, toplam, sorumlu = _yazar_sirasi_bul(metin, isim)
                 f_obj3 = t.Faaliyet(kod=kod, adet=1,
                                 toplam_yazar=toplam, yazar_sirasi=si,
-                                docent_sonrasi=_docent_sonrasi_mi(metin))
+                                docent_sonrasi=_docent_sonrasi_mi(metin),
+                                aves_kod=aves_kod)
                 f_obj3._kunye = metin[:300]
                 ekle(f_obj3)
 
@@ -594,6 +613,7 @@ try:
                 f_obj5._kunye = m[:300]
                 ekle(f_obj5)
 
+        _st2.session_state["_aves_tekrarlar"] = tekrarlar
         return faaliyetler
 
     AVES_OK = True
@@ -1017,11 +1037,12 @@ def _faaliyet_satirlari(kadro_su: str) -> list[dict]:
         kunye = getattr(f, "_kunye", "") or ""
         rows.append({
             "#":        i + 1,
+            "AVES":     getattr(f, "aves_kod", "") or "—",
             "Kod":      f.kod,
             "Faaliyet": bilgi_f.get("ad", "")[:55],
             "Künye":    kunye[:120] if kunye else "—",
             "Adet":     f.adet,
-            "Top.Yz.":  f.toplam_yazar if grup in {1, 2, 3} else "-",
+            "Top.Yz.":  str(f.toplam_yazar) if grup in {1, 2, 3} else "-",
             "Sira":     (str(f.yazar_sirasi) + (" (Sor/Sny)" if f.sorumlu_veya_senyör else ""))
                         if grup in {1, 2, 3} else "-",
             "Q/Pat.":   ek,
@@ -1291,7 +1312,7 @@ def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
     s_tdc  = ParagraphStyle("tdc", parent=s_td, alignment=1)
     s_tdb  = ParagraphStyle("tdb", parent=s_td, fontName=fb, alignment=2)
 
-    basliklar = ["#", "Kod", "Faaliyet", "EK-2 Puanı", "Çarpan", "Tam Puan",
+    basliklar = ["#", "EK-2 Kod", "Faaliyet", "EK-2 Puanı", "Çarpan", "Tam Puan",
                  "Yazar Sırası", "Yazar Payı", "Adet", "Hesap. Puan",
                  "Hak Edilen", "Tür"]
     fdata = [[Paragraph(b, s_th) for b in basliklar]]
@@ -1309,7 +1330,8 @@ def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
         if d["tavan_kesinti"] > 0:
             hak_txt += f"<br/><font size=6>(tavan −{_sayi(d['tavan_kesinti'])})</font>"
         fdata.append([
-            Paragraph(str(ri), s_tdc),
+            # AVES kodu (kanıt klasörü adı) varsa o, yoksa sıra numarası
+            Paragraph(d["aves_kod"] or str(ri), s_tdc),
             Paragraph(d["kod"], s_tdc),
             Paragraph(_xml_escape(d["ad"]), s_td),
             Paragraph(_sayi(d["taban"]), s_tdc),
@@ -1335,12 +1357,15 @@ def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
                 else colors.HexColor("#EAF0FA"))
     fts.add("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#D6E4F7"))
     ft = Table(fdata, repeatRows=1,
-               colWidths=[0.6*cm, 1.0*cm, 4.3*cm, 1.1*cm, 1.7*cm, 1.1*cm,
+               colWidths=[1.2*cm, 1.0*cm, 3.7*cm, 1.1*cm, 1.7*cm, 1.1*cm,
                           1.2*cm, 1.2*cm, 1.0*cm, 1.7*cm, 1.5*cm, 1.0*cm])
     ft.setStyle(fts)
     elems.append(ft)
     elems.append(Spacer(1, 4))
     elems.append(Paragraph(
+        "<b>#:</b> AVES'ten aktarılan faaliyette AVES kodu (UM: uluslararası makale, "
+        "UL: ulusal makale, KB: kitap / kitap bölümü, UB: uluslararası bildiri, "
+        "NB: ulusal bildiri; sayı AVES'teki sıra) – kanıt klasörü adıyla aynıdır. "
         "<b>EK-2 Puanı:</b> yönergedeki faaliyet puanı. "
         "<b>Çarpan:</b> dergi kuartili (Q1 ×2, Q2 ×1.5, Q3 ×1.25), patent "
         "durumu, ikinci danışmanlık. "
@@ -1637,6 +1662,11 @@ with tab1:
     aves_url_v  = st.session_state.get("v_aves_url", "")
     aves_isim_v = st.session_state.get("v_ad", "")
 
+    for _tekrar, _tutulan, _kunye in st.session_state.get("_aves_tekrarlar", []):
+        st.warning(f"⚠️ **{_tekrar}**, AVES'te **{_tutulan}** ile aynı eser olarak "
+                   f"kayıtlı; yalnızca {_tutulan} alındı (her eser bir kez puanlanır). "
+                   f"— {_kunye}…")
+
     ba1, ba2, ba3 = st.columns([2, 2, 1])
     with ba1:
         if st.button("⚡ Yükle ve Ekle", type="primary",
@@ -1930,7 +1960,9 @@ with tab2:
             ozet = kunye_d[:60] if kunye_d else bilgi_d_ad[:60]
 
             with st.expander(
-                f"**#{didx+1}** · `{f_d.kod}` · {ozet}… "
+                f"**#{didx+1}**"
+                + (f" · **{f_d.aves_kod}**" if getattr(f_d, "aves_kod", "") else "")
+                + f" · `{f_d.kod}` · {ozet}… "
                 f"  ➤ *{p_f:.2f} puan*",
                 expanded=False,
             ):
@@ -2154,7 +2186,8 @@ if sonuc is not None and son_aday is not None:
                     _ad = _EK2.get(_f.kod, {}).get("ad","")[:50]
                     _pp, _ = _fpuan(_f)
                     _rows_doc.append({
-                        "#": _i+1, "Kod": _f.kod, "Faaliyet": _ad,
+                        "#": _i+1, "AVES": getattr(_f, "aves_kod", "") or "—",
+                        "Kod": _f.kod, "Faaliyet": _ad,
                         "Adet": _f.adet,
                         "Yazar": f"{_f.yazar_sirasi}/{_f.toplam_yazar}",
                         "Q": _f.q_degeri or "",
@@ -2285,6 +2318,7 @@ if sonuc is not None and son_aday is not None:
                 unsafe_allow_html=True)
     drows = [
         {
+            "AVES":     d.get("aves_kod") or "—",
             "Kod":      d["kod"],
             "Faaliyet": d["ad"][:60],
             "Adet":     d["adet"],
