@@ -23,6 +23,7 @@ import json
 import re
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 
 from .kayit import KanitArsivi, KanitKaydi
@@ -39,8 +40,24 @@ ALANLAR = {
     "PD": ("PD", "Publication Date"), "EA": ("EA", "Early Access Date"), "DI": ("DI", "DOI"),
     "WE": ("WE", "Web of Science Index"), "CR": ("CR", "Cited References"),
     "DT": ("DT", "Document Type"), "VL": ("VL", "Volume"), "BP": ("BP", "Start Page"),
-    "AR": ("AR", "Article Number"),
+    "AR": ("AR", "Article Number"), "PT": ("PT", "Publication Type"),
 }
+
+AYLAR = {"jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6, "jul": 7, "aug": 8,
+         "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+         "spr": 3, "sum": 6, "fal": 9, "aut": 9, "win": 1}     # mevsim → ilk ayı
+
+
+def ay_tarihi(metin: str, yil: int | None = None) -> date | None:
+    """WoS tarih alanı ("MAR 2023", "MAR 15 2023", "JAN-FEB", PD + PY) → ayın ilk günü."""
+    m = re.match(r"\s*([A-Za-z]{3})", metin or "")
+    if not m or m.group(1).lower() not in AYLAR:
+        return None
+    y = re.search(r"(19|20)\d{2}", metin)
+    yil = int(y.group(0)) if y else yil
+    return date(yil, AYLAR[m.group(1).lower()], 1) if yil else None
+
+
 ENDEKS_KODU = [("5.1", ("science citation index expanded", "sci expanded", "science citation index",
                         "social sciences citation index", "ssci", "arts humanities citation index",
                         "a hci", "ahci")),
@@ -64,6 +81,12 @@ class WosKaydi:
     endeks: str                       # WE alanı (ham)
     kaynakca: list[str] = field(default_factory=list)
     tur: str = ""
+    tarih: date | None = None         # ay hassasiyetinde en erken yayım tarihi (EA / PD)
+    yayin_turu: str = ""              # PT: J dergi, B kitap, S seri, P patent
+
+    @property
+    def kitap_bolumu(self) -> bool:
+        return "book chapter" in self.tur.lower()
 
     @property
     def endeks_kodu(self) -> str | None:
@@ -120,7 +143,10 @@ def oku(yol: Path) -> list[WosKaydi]:
             dergi=al("SO"), issn=al("SN"), eissn=al("EI"),
             yil=int(yil.group(0)) if yil else None, doi=al("DI").lower(),
             endeks=al("WE"), kaynakca=[c.strip() for c in al("CR").split(";") if c.strip()],
-            tur=al("DT")))
+            tur=al("DT"), yayin_turu=al("PT"),
+            tarih=min((t for t in (ay_tarihi(al("EA")),
+                                   ay_tarihi(al("PD"), int(yil.group(0)) if yil else None))
+                       if t), default=None)))
     return sonuc
 
 
@@ -289,6 +315,8 @@ def uygula(plan: list[PlanSatiri], arsiv: KanitArsivi, indir: bool = True,
             "kaynak": KAYNAK, "ut": w.ut, "doi": w.doi, "baslik": w.baslik, "yazarlar": w.yazarlar,
             "dergi": w.dergi, "issn": w.issn, "eissn": w.eissn, "yil": w.yil,
             "endeks": w.endeks, "endeks_kodu": w.endeks_kodu,
+            "tarih": w.tarih.isoformat() if w.tarih else None,
+            "belge_turu": w.tur, "kitap_bolumu": w.kitap_bolumu,
             "atif_yapilan": p.hedef.aves_kod}, ensure_ascii=False, indent=1), encoding="utf-8")
         _endeks_sayfasi(w, p.hedef, p.klasor / "endeks_bilgisi.pdf")
         indi = False
@@ -308,8 +336,32 @@ def uygula(plan: list[PlanSatiri], arsiv: KanitArsivi, indir: bool = True,
                 + (f"https://doi.org/{w.doi}\n" if w.doi else f"WoS: {w.ut}\n"), encoding="utf-8")
         sayac["tam metin indirildi" if indi else "tam metin indirilecek"] += 1
     sayac.update(p.durum for p in plan)
+    kayitlari_guncelle(arsiv, [p.wos for p in plan])
     indirilecek_listesi(arsiv)
     return sayac
+
+
+def kayitlari_guncelle(arsiv: KanitArsivi, kayitlar: list[WosKaydi]) -> int:
+    """Mevcut WoS atıf klasörlerinin kayit.json'una tarih ve belge türünü işler
+    (bu alanlar eklenmeden önce açılmış klasörler için)."""
+    ut = {w.ut: w for w in kayitlar if w.ut}
+    n = 0
+    for kay in arsiv.kayitlar:
+        for alt in kay.atif_klasorleri():
+            kj = alt / "kayit.json"
+            try:
+                v = json.loads(kj.read_text(encoding="utf-8")) if kj.exists() else {}
+            except (OSError, json.JSONDecodeError):
+                continue
+            if v.get("kaynak") != KAYNAK or (w := ut.get(v.get("ut"))) is None:
+                continue
+            yeni = {"tarih": w.tarih.isoformat() if w.tarih else None,
+                    "belge_turu": w.tur, "kitap_bolumu": w.kitap_bolumu}
+            if any(v.get(k) != d for k, d in yeni.items()):
+                v.update(yeni)
+                kj.write_text(json.dumps(v, ensure_ascii=False, indent=1), encoding="utf-8")
+                n += 1
+    return n
 
 
 def eksikleri_indir(arsiv: KanitArsivi, ilerleme=None) -> Counter:

@@ -123,6 +123,51 @@ class Wos(unittest.TestCase):
         at = [x for x in atif.atiflari_topla(KanitArsivi(self.kok), "Yılmaz")
               if x.yol.parent.name.startswith("WoS_")]
         self.assertEqual([x.endeks for x in at], ["5.7"])
+    def test_ay_tarihi_ve_zaman(self):
+        from datetime import date
+        self.assertEqual(wos.ay_tarihi("MAR 2023"), date(2023, 3, 1))
+        self.assertEqual(wos.ay_tarihi("DEC 15", 2022), date(2022, 12, 1))
+        self.assertEqual(wos.ay_tarihi("SPR", 2024), date(2024, 3, 1))
+        self.assertIsNone(wos.ay_tarihi("", 2024))
+        basvuru = date(2023, 1, 4)
+        A = atif.Atif
+        z = lambda **k: atif.zaman(A("UM01", Path("x.pdf"), "5.1", False, "", **k), basvuru)  # noqa: E731
+        self.assertEqual(z(yil=2023), "öncesi")                          # yalnız yıl: temkinli
+        self.assertEqual(z(yil=2023, ay=date(2023, 2, 1)), "sonrası")
+        self.assertEqual(z(yil=2023, ay=date(2023, 1, 1)), "öncesi")     # başvuru ayı: temkinli
+        self.assertEqual(z(yil=2024), "sonrası")
+        self.assertEqual(atif.zaman(A("UM01", Path("x"), "5.1", False, "", 2024), None), "bilinmiyor")
+
+    def test_kitap_bolumu_uak_5b(self):
+        from datetime import date
+        import tnku_atama as t
+        import uak_kriterleri as uk
+        at = [atif.Atif("UM01", Path("a.pdf"), "5.7", False, "", 2025, date(2025, 3, 1), True),
+              atif.Atif("UM01", Path("b.pdf"), "5.7", False, "", 2025, date(2025, 3, 1), False),
+              atif.Atif("UM01", Path("c.pdf"), "5.1", False, "", 2023, date(2023, 6, 1))]
+        fl = atif.faaliyetler(at, date(2023, 1, 4), None, t.Faaliyet)
+        self.assertEqual(sorted(f.kimlik for f in fl),
+                         ["atif:5.1:sonrası", "atif:5.7:sonrası", "atif:5.7:sonrası:bolum"])
+        self.assertEqual(atif.kimlik_coz("atif:5.7:sonrası:bolum"), ("5.7", "sonrası", True))
+        kset = uk.setler()[0]
+        kalem = {f.kimlik: uk.kalem_bul(kset, f)[1].kod for f in fl}
+        self.assertEqual(kalem["atif:5.7:sonrası:bolum"], "5b")
+        self.assertEqual(kalem["atif:5.7:sonrası"], "5a")
+
+    def test_kayitlari_guncelle(self):
+        a = KanitArsivi(self.kok)
+        plan = wos.plan_olustur(a, wos.oku(self.dosya), "Yılmaz")
+        wos.uygula(plan, a, indir=False)
+        kj = next((self.um01 / "atiflar").glob("WoS_*/kayit.json"))
+        v = json.loads(kj.read_text(encoding="utf-8"))
+        v.pop("tarih"), v.pop("kitap_bolumu")
+        kj.write_text(json.dumps(v), encoding="utf-8")
+        kayitlar = wos.oku(self.dosya)
+        for w in kayitlar:
+            w.tur = "Article; Book Chapter"
+        self.assertEqual(wos.kayitlari_guncelle(KanitArsivi(self.kok), kayitlar), 2)
+        self.assertTrue(json.loads(kj.read_text(encoding="utf-8"))["kitap_bolumu"])
+
 
 if __name__ == "__main__":
     unittest.main()

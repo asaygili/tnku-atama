@@ -506,6 +506,10 @@ def paket_bolumu(aday, sonuc, a: KanitArsivi | None, rapor_pdf) -> None:
     s1, s2 = st.columns(2)
     with s1:
         atif_k = st.checkbox("Atıf kanıtlarını ekle", value=True, key="pk_atif")
+        atif_tam = st.checkbox("Yalnızca tam metni olan atıfları ekle", value=False, key="pk_atif_tam",
+                               help="Tam metni olan atıflar her durumda önce gelir. İşaretlenirse "
+                                    "yalnızca WoS kaydıyla belgelenen atıflar dosyaya girmez "
+                                    "(puanda sayılmaya devam eder; kalemde not düşülür).")
         oncesi = st.checkbox("Doçentlik başvurusu öncesi faaliyetleri de ekle", value=True,
                              key="pk_oncesi")
     with s2:
@@ -524,6 +528,7 @@ def paket_bolumu(aday, sonuc, a: KanitArsivi | None, rapor_pdf) -> None:
                           key="pk_cikti")
     if st.button("📦 Başvuru dosyasını hazırla", type="primary", key="pk_hazirla"):
         ayar = paket.PaketAyarlari(atif_kanitlari=atif_k, docent_oncesi=oncesi,
+                                   atif_yalniz_tam_metin=atif_tam,
                                    tam_bildiri_kitabi=kitap, hafiflet=hafif, genel_belgeler=genel)
         with st.spinner("Başvuru dosyası hazırlanıyor… (büyük arşivlerde birkaç dakika sürebilir)"):
             try:

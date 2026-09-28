@@ -54,6 +54,8 @@ class PaketAyarlari:
     # (USB klasöründeki dosyalar özgün kalır)
     hafiflet: bool = True
     pdf_dosya_siniri_mb: float = 15.0  # birleşik PDF'e alınacak en büyük dosya
+    # yalnızca tam metni olan atıfları koy (WoS kaydıyla belgelenenler dışarıda kalır)
+    atif_yalniz_tam_metin: bool = False
     genel_belgeler: list[Path] = field(default_factory=list)
 
 
@@ -116,7 +118,8 @@ def _kanit_dosyalari(k: KanitKaydi, ayar: PaketAyarlari) -> list[Path]:
 
 
 def kalemleri_hazirla(aday, arsiv: KanitArsivi, ayar: PaketAyarlari) -> list[PaketKalemi]:
-    from .atif import atiflari_topla
+    from .atif import atiflari_topla, kimlik_coz
+    from .atif import zaman as atif_zamani
     from .denetim import denetle
 
     import aves_yardimci as ay
@@ -127,6 +130,7 @@ def kalemleri_hazirla(aday, arsiv: KanitArsivi, ayar: PaketAyarlari) -> list[Pak
     basliklar = {k.aves_kod: ay.baslik_cikar(k.kunye) for k in arsiv.kayitlar if k.aves_kod}
     atiflar = None
     atif_yollari: set = set()
+    wos_raporu = None
     kalemler = []
     for f in aday.faaliyetler:
         if f.kod not in t.EK2_PUANLAR:
@@ -144,15 +148,25 @@ def kalemleri_hazirla(aday, arsiv: KanitArsivi, ayar: PaketAyarlari) -> list[Pak
                 if atiflar is None:
                     atiflar = atiflari_topla(arsiv, (aday.ad_soyad.split() or [""])[-1])
                     atif_yollari = {x.yol for x in atiflar}
-                _, kod, zaman = f.kimlik.split(":", 2)
+                kod, zaman, bolum = kimlik_coz(f.kimlik)
                 basvuru = aday.docent_basvuru_tarihi
                 bilinen = ("5.1", "5.2", "5.5", "5.7")
-                for a in atiflar:
-                    a_zaman = ("sonrası" if a.yil > basvuru.year else "öncesi") \
-                        if (basvuru and a.yil) else "bilinmiyor"
+                if wos_raporu is None:            # WoS'un resmî atıf raporu (_WoS\*.pdf)
+                    wos_raporu = sorted((arsiv.kok / "_WoS").glob("*.pdf")) \
+                        if (arsiv.kok / "_WoS").is_dir() else []
+                    kalem.dosyalar += wos_raporu
+                # Tam metni olan atıflar önce; yalnızca WoS kaydıyla belgelenenler sonra
+                yalniz_kayit = 0
+                for a in sorted(atiflar, key=lambda a: a.yol.name == "endeks_bilgisi.pdf"):
                     # endeksi belirsiz atıflar yalnızca kullanıcının onlara verdiği koda girer
                     ayni_kod = a.endeks == kod if a.endeks else kod not in bilinen
-                    if not a.oz_atif and ayni_kod and a_zaman == zaman:
+                    if kod == "5.7" and a.kitap_bolumu != bolum:
+                        continue
+                    if not a.oz_atif and ayni_kod and atif_zamani(a, basvuru) == zaman:
+                        if a.yol.name == "endeks_bilgisi.pdf":
+                            yalniz_kayit += 1
+                            if ayar.atif_yalniz_tam_metin:
+                                continue
                         kalem.dosyalar.append(a.yol)
                         # birleşik PDF'e atıf yapan yayının yalnızca ilk sayfası ve
                         # atıf yapılan eserin geçtiği sayfalar girer (tamamı USB'de)
@@ -166,6 +180,15 @@ def kalemleri_hazirla(aday, arsiv: KanitArsivi, ayar: PaketAyarlari) -> list[Pak
                                            and p not in atif_yollari        # başka bir atıf
                                            and (p.name == "endeks_bilgisi.pdf"
                                                 or not es.ilk_sayfa_eslesme(p))][:4]
+                if yalniz_kayit:
+                    kalem.eksikler.append(
+                        f"{yalniz_kayit} atıfın tam metni yok; yalnızca WoS kaydıyla belgeli"
+                        + (" (birleşik PDF'e ve USB'ye alınmadı)" if ayar.atif_yalniz_tam_metin
+                           else "") + ". WoS atıf raporunu _WoS klasörüne PDF olarak koyun.")
+                if bolum:
+                    kalem.eksikler.append(
+                        "Kitap bölümündeki atıf: EK-2 5.7 'özgün bilimsel kitapta atıf' şartını "
+                        "karşılayıp karşılamadığı komisyon kararına bağlıdır; ÜAK'ta 5b sayıldı.")
         else:
             k = arsiv.bul(f)
             kalem.kayit = k
@@ -206,12 +229,16 @@ def kalemleri_hazirla(aday, arsiv: KanitArsivi, ayar: PaketAyarlari) -> list[Pak
             ad = k.kayit.klasor.name.split("_", 2)[-1]
             k.baslik = ay.baslik_cikar(k.kayit.kunye)
         elif f.kimlik.startswith("atif:"):
-            zaman = f.kimlik.split(":")[-1]
-            k.baslik = f"{f.adet} atıf (doçentlik başvurusu {zaman})"
+            _, zaman, bolum = kimlik_coz(f.kimlik)
+            k.baslik = (f"{f.adet} atıf (doçentlik başvurusu {zaman})"
+                        + (" – kitap bölümlerinde" if bolum else ""))
         elif k.kayit is not None:
             k.baslik = k.kayit.klasor.name
         k.sira = i
         k.klasor_adi = f"{i:02d}_{etiket}_{f.kod}_{slug(ad, 40)}"
+        if getattr(f, "baslica_eser", False):     # Md. 11(5): dosyada ayrıca belirtilir
+            k.baslik = "★ BAŞLICA ARAŞTIRMA ESERİ – " + (k.baslik or ad)
+            k.klasor_adi += "_BASLICA_ARASTIRMA_ESERI"
     return kalemler
 
 

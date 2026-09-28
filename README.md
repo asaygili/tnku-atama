@@ -121,4 +121,4 @@ Eğer bir hata fark ederseniz veya güncel yönerge değişikliklerini sisteme y
 
 ---
 **Geliştirici:** Ahmet SAYGILI
-**Son Güncelleme:** 16.04.2026
+**Son Güncelleme:** 28.09.2026 (EYS-YNG-129 Rev. 2, 10.08.2026)

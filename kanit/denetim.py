@@ -6,6 +6,7 @@ belgelendirilmiş olması şarttır").
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 import tnku_atama as t
@@ -17,6 +18,12 @@ from .ortak import norm
 # Kanıt türü → ilgili yönerge maddesi
 MADDE = {"tam_metin": "Md. 7(4)/(6)", "endeks": "Md. 7(3)", "q": "EK-2 1.1 (Q çarpanı)",
          "program": "Md. 7(5)", "katilim": "Md. 7(5)", "kapak": "Md. 7(5)", "isbn": "Md. 7(6)"}
+
+
+# Md. 7(4): makale "cilt, sayı ve sayfa numarası alınmış" olmalı
+CILT_SAYFA = re.compile(r"\bvol\.?\s*\d|\bcilt\b|\bpp\.?\s*\d|\bss\.?\s*\d|"
+                        r"\bno\.?\s*\d|\bsayı\b|\bsayfa\b|\bart(icle)?\.?\s*(no\.?)?\s*\d",
+                        re.I)
 
 
 @dataclass
@@ -48,6 +55,9 @@ def denetle(faaliyetler, arsiv: KanitArsivi | None) -> list[Uyari]:
             d = kanit_durumu(k, onek)
             eksik += [f"{a} ({MADDE.get(e, 'Md. 7(7)')})"
                       for e, a in zip(d.eksik, d.eksik_aciklamalari())]
+            if onek in ("UM", "UL") and not CILT_SAYFA.search(k.kunye or ""):
+                eksik.append("Künyede cilt / sayı / sayfa numarası yok – öngörünümdeki makale "
+                             "başvuru tarihine kadar yayımlanmış olmalıdır (Md. 7(4))")
         else:
             dosyalar = k.dosyalar()
             if not dosyalar:

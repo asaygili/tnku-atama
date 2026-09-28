@@ -91,6 +91,8 @@ def ders_onerisi(arsiv: KanitArsivi, degerlendirme: date | None = None,
     donemler = [d for d in ders_donemleri(arsiv) if d.tur != "Yaz"]
     return DersOnerisi(
         donemler,
-        [d for d in donemler if d.bitis >= uc_yil_once and d.baslangic <= degerlendirme],
+        # EK-2 17.4 "son üç yılda her bir dönem": değerlendirme tarihine kadar tamamlanmış son dönemler
+        # (3 yılda en fazla 6 güz/bahar dönemi)
+        [d for d in donemler if d.bitis >= uc_yil_once and d.bitis <= degerlendirme][-6:],
         [d for d in donemler if unvan_tarihi and d.baslangic >= unvan_tarihi],
     )

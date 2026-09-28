@@ -5,6 +5,8 @@ bulunup bulunmadığı (dosya adlarından; ilgili PDF'lerin ilk sayfasından da 
 
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -42,7 +44,7 @@ GEREKLI = {
 
 
 def _q_gerekli(tur: str) -> bool:
-    return "SCI" in (tur or "").upper()
+    return re.search(r"(?<![A-Z])(SCI|SSCI|AHCI)", (tur or "").upper()) is not None
 
 
 @dataclass

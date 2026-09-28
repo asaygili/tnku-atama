@@ -43,9 +43,25 @@ class Atif:
     oz_atif: bool
     doi: str
     yil: int | None
+    ay: date | None = None        # yayım ayının ilk günü (WoS erken erişim / yayın tarihi)
+    kitap_bolumu: bool = False    # atıf yapan yayın bir kitap bölümü (ÜAK 5b)
 
     def tarih(self) -> date | None:
-        return date(self.yil, 1, 1) if self.yil else None
+        return self.ay or (date(self.yil, 1, 1) if self.yil else None)
+
+
+def zaman(a: Atif, basvuru_tarihi: date | None) -> str:
+    """'sonrası' / 'öncesi' / 'bilinmiyor' (EK-1 (g), Md. 11(2)).
+
+    Ay biliniyorsa: ayın tamamı başvuru tarihinden sonraysa 'sonrası'.
+    Yalnızca yıl biliniyorsa başvuru yılındaki atıflar temkinli olarak 'öncesi' sayılır."""
+    if not basvuru_tarihi:
+        return "bilinmiyor"
+    if a.ay:
+        return "sonrası" if a.ay > basvuru_tarihi else "öncesi"
+    if a.yil:
+        return "sonrası" if a.yil > basvuru_tarihi.year else "öncesi"
+    return "bilinmiyor"
 
 
 def _kanit_belgesi_mi(p: Path) -> bool:
@@ -82,8 +98,9 @@ def _yil(metin: str) -> int | None:
                   r"©\s*((?:19|20)\d{2})"):
         if m := re.search(desen, metin, re.I):
             return int(m.group(1))
+    # Etiketsiz yıllar ("Vision 2030" gibi) atıfı başvuru sonrasına kaydırmasın: en küçüğü
     yillar = [int(y) for y in re.findall(r"\b((?:19|20)\d{2})\b", metin[:3000])]
-    return max(yillar) if yillar else None
+    return min(yillar) if yillar else None
 
 
 def _wos_atifi(k: KanitKaydi, alt: Path) -> Atif | None:
@@ -100,8 +117,12 @@ def _wos_atifi(k: KanitKaydi, alt: Path) -> Atif | None:
         return None
     pdfler = sorted(p for p in alt.glob("*.pdf") if p.name != "endeks_bilgisi.pdf")
     yol = pdfler[0] if pdfler else alt / "endeks_bilgisi.pdf"
+    try:
+        ay = date.fromisoformat(v["tarih"]) if v.get("tarih") else None
+    except ValueError:
+        ay = None
     return Atif(k.aves_kod, yol, v.get("endeks_kodu"), False, (v.get("doi") or "").lower(),
-                v.get("yil"))
+                v.get("yil"), ay, bool(v.get("kitap_bolumu")))
 
 
 def atiflari_topla(arsiv: KanitArsivi, soyad: str) -> list[Atif]:
@@ -151,7 +172,10 @@ def atiflari_topla(arsiv: KanitArsivi, soyad: str) -> list[Atif]:
                     gorulen_doi.add(doi)
                 endeks = klasor_endeksi if len(yayinlar) == 1 or klasor_endeksi else None
                 endeks = endeks or _endeks(ilk[:3000])
-                oz = bool(soyad_n) and soyad_n in norm(ilk[:1500])
+                # Md. 4(d): adayın yazar olduğu yayın öz atıftır (soyadı tam kelime olarak,
+                # uzun yazar listeleri için ilk sayfanın başında)
+                oz = bool(soyad_n) and re.search(rf"\b{re.escape(soyad_n)}\b",
+                                                 norm(ilk[:4000])) is not None
                 sonuc.append(Atif(k.aves_kod, p, endeks, oz, doi, _yil(ilk)))
     return sonuc
 
@@ -162,25 +186,38 @@ def ozet(atiflar: list[Atif], basvuru_tarihi: date | None = None) -> Counter:
     for a in atiflar:
         if a.oz_atif:
             continue
-        if basvuru_tarihi and a.yil:
-            zaman = "sonrası" if a.yil > basvuru_tarihi.year else "öncesi"
-        else:
-            zaman = "bilinmiyor"
-        c[(a.endeks or "belirsiz", zaman)] += 1
+        c[(a.endeks or "belirsiz", zaman(a, basvuru_tarihi))] += 1
     return c
+
+
+KITAP_BOLUMU_UAK = "5b"   # ÜAK: kitaplarda bölüm olarak yayımlanan yayınlardaki atıf
+
+
+def kimlik_coz(kimlik: str) -> tuple[str, str, bool]:
+    """'atif:<kod>:<zaman>[:bolum]' → (kod, zaman, kitap_bolumu)."""
+    p = kimlik.split(":")
+    return p[1], p[2] if len(p) > 2 else "bilinmiyor", p[3:4] == ["bolum"]
 
 
 def faaliyetler(atiflar: list[Atif], basvuru_tarihi: date | None, belirsiz_kod: str | None,
                 faaliyet_sinifi) -> list:
-    """Atıfları EK-2 5.x faaliyetlerine dönüştürür (kimlik 'atif:<kod>:<zaman>').
+    """Atıfları EK-2 5.x faaliyetlerine dönüştürür (kimlik 'atif:<kod>:<zaman>[:bolum]').
 
-    Doçentlik başvurusu yılı ile aynı yıldaki atıflar temkinli olarak 'öncesi' sayılır.
-    belirsiz_kod: endeksi belirlenemeyenlerin kodu (None → eklenmez)."""
+    Zaman ayrımı `zaman()` ile yapılır. Kitap bölümlerindeki atıflar (5.7) ayrı satır olur
+    ve ÜAK'ta 5b kalemine eşlenir. belirsiz_kod: endeksi belirlenemeyenlerin kodu
+    (None → eklenmez)."""
     toplam = Counter()
-    for (endeks, zaman), adet in ozet(atiflar, basvuru_tarihi).items():
-        kod = endeks if endeks != "belirsiz" else belirsiz_kod
+    for a in atiflar:
+        if a.oz_atif:
+            continue
+        kod = a.endeks or belirsiz_kod
         if kod:
-            toplam[(kod, zaman)] += adet
-    return [faaliyet_sinifi(kod, adet=adet, docent_sonrasi=(zaman == "sonrası"),
-                            kimlik=f"atif:{kod}:{zaman}")
-            for (kod, zaman), adet in sorted(toplam.items())]
+            toplam[(kod, zaman(a, basvuru_tarihi), a.kitap_bolumu and kod == "5.7")] += 1
+    sonuc = []
+    for (kod, z, bolum), adet in sorted(toplam.items()):
+        f = faaliyet_sinifi(kod, adet=adet, docent_sonrasi=(z == "sonrası"),
+                            kimlik=f"atif:{kod}:{z}" + (":bolum" if bolum else ""))
+        if bolum and hasattr(f, "uak_kalem"):
+            f.uak_kalem = KITAP_BOLUMU_UAK
+        sonuc.append(f)
+    return sonuc

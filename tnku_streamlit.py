@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 TNKÜ Öğretim Üyeliği Kadrosuna Başvuru Puanlama Programı – Web Arayüzü
-Tekirdağ Namık Kemal Üniversitesi | EYS-YNG-129 (28.03.2025)
+Tekirdağ Namık Kemal Üniversitesi | EYS-YNG-129 (Rev. 2, 10.08.2026)
 
 Çalıştırmak için:
     pip install streamlit pandas reportlab
@@ -11,6 +11,7 @@ Tekirdağ Namık Kemal Üniversitesi | EYS-YNG-129 (28.03.2025)
 from __future__ import annotations
 import io
 import os
+import re
 import datetime
 import pandas as pd
 import streamlit as st
@@ -162,18 +163,8 @@ try:
 
         return 1, len(yazarlar), False
 
-    def _makale_kod(endeksler: list, metin: str = "") -> str:
-        eks = " ".join(endeksler).upper()
-        m = metin.lower()
-        if any(x in eks for x in ("SCI-EXPANDED","SCI-E","SSCI","AHCI")):
-            if "derleme" in m or "review" in m: return "1.3"
-            if "teknik not" in m or "editöre" in m: return "1.2"
-            return "1.1"
-        if "ESCI" in eks or "SCOPUS" in eks: return "1.4"
-        if "TRDIZIN" in eks or "TR DİZİN" in eks:
-            return "1.6" if "ulusal" in m else "1.6"
-        if any(x in eks for x in ("EBSCO","DOAJ","DRJI")): return "1.5"
-        return "1.7"
+    def _makale_kod(endeksler: list, metin: str = "", tip: str = "") -> str:
+        return ay.makale_ek2_kodu(endeksler, metin, tip=tip)
 
 
     _aves_son_hata = [""]  # Hata mesajını dışarı taşımak için
@@ -508,10 +499,9 @@ try:
                 si, toplam, sorumlu = _yazar_sirasi_bul(metin, isim)
                 # Önce kodu belirle
                 if kat_key == "ulusal_makale":
-                    eks_str = " ".join(endeks).upper()
-                    kod = "1.6" if "TRDIZIN" in eks_str or "TR DİZİN" in eks_str else "1.8"
+                    kod = ay.makale_ek2_kodu(endeks, metin, ulusal=True, tip=o.get("tip", ""))
                 else:
-                    kod = _makale_kod(endeks, metin)
+                    kod = _makale_kod(endeks, metin, o.get("tip", ""))
                 # Q değeri sadece 1.1, 1.3, 4.1 için geçerli
                 if kod in ("1.1", "1.3", "4.1"):
                     q = o.get("q") or _kunye_q_bul(metin) or _aves_q_bul(metin)
@@ -533,7 +523,7 @@ try:
             if not blok: continue
             for aves_kod, o in _ogeler(kat_key, blok):
                 metin = o.get("metin","")
-                kod = ay.kitap_ek2_kodu(kat_key, metin)
+                kod = ay.kitap_ek2_kodu(kat_key, metin, o.get("tip", ""))
                 si, toplam, sorumlu = _yazar_sirasi_bul(metin, isim)
                 f_obj2 = t.Faaliyet(kod=kod, adet=1,
                                 toplam_yazar=toplam, yazar_sirasi=si,
@@ -549,10 +539,7 @@ try:
             if not blok: continue
             for aves_kod, o in _ogeler(kat_key, blok):
                 metin = o.get("metin","").lower()
-                if ulusl:
-                    kod = "3.3" if "özet" in metin or "abstract" in metin else                           "3.4" if "poster" in metin else "3.2"
-                else:
-                    kod = "3.7" if "özet" in metin else                           "3.8" if "poster" in metin else "3.6"
+                kod = ay.bildiri_ek2_kodu(o.get("tip", ""), metin, ulusl)
                 si, toplam, sorumlu = _yazar_sirasi_bul(metin, isim)
                 f_obj3 = t.Faaliyet(kod=kod, adet=1,
                                 toplam_yazar=toplam, yazar_sirasi=si,
@@ -561,13 +548,11 @@ try:
                 f_obj3._kunye = o.get("metin", "")[:300]
                 ekle(f_obj3)
 
-        # 5. Atıf (Scholar)
-        atif   = int(sch.get("atif",0)    or 0)
-        hindex = int(sch.get("h_index",0) or 0)
-        if atif > 0:
-            ekle(t.Faaliyet(kod="5.1", adet=atif))
-        if hindex > 0:
-            ekle(t.Faaliyet(kod="5.9", adet=hindex))
+        # 5. Atıf (Scholar): Google Scholar atıfı EK-2 5.1 (SCI dergilerinde atıf) değildir;
+        # h-endeks de 5.9'da "yalnızca Web of Science" ile sayılır. Faaliyet olarak
+        # eklenmez, yalnızca bilgi olarak gösterilir.
+        _st2.session_state["_aves_scholar"] = (int(sch.get("atif", 0) or 0),
+                                               int(sch.get("h_index", 0) or 0))
 
         # 11. Patent
         PATENT_KW = {"patent","faydalı model","ep ","us ","wo ","pct","wipo"}
@@ -579,12 +564,13 @@ try:
                 tip   = o.get("tip","")
                 if tip == "odul": continue
                 if tip == "patent" or any(k in m_low for k in PATENT_KW):
-                    if any(x in m_low for x in ("us ","ep ","wo ","pct","wipo")):
+                    if re.search(r"\b(us|ep|wo|pct|wipo|epo|uspto)\b", m_low):
                         kod, pd = "11.1", "tescilli"
                     else:
                         kod, pd = "11.2", "tescilli"
-                    if "başvuru" in m_low: pd = "basvuru"
-                    elif "araştırma" in m_low: pd = "arastirma_raporu"
+                    if "araştırma rapor" in m_low: pd = "arastirma_raporu"
+                    elif "başvuru" in m_low: pd = "basvuru"
+
                     f_obj4 = t.Faaliyet(kod=kod, adet=1, patent_durum=pd,
                                         docent_sonrasi=_docent_sonrasi_mi(metin))
                     f_obj4._kunye = metin[:300]
@@ -606,6 +592,10 @@ try:
                     kod = "12.13" if yurt else "12.14"
                 f_obj5 = t.Faaliyet(kod=kod, adet=1,
                                     docent_sonrasi=_docent_sonrasi_mi(m))
+                # ÜAK 7a/7b yalnızca AB Çerçeve Programı; diğer AB destekli projeler 7c
+                if kod in ("12.1", "12.2") and not any(
+                        x in m for x in ("h2020", "horizon", "fp7", "çerçeve", "framework")):
+                    f_obj5.uak_kalem = "7c"
                 f_obj5._kunye = m[:300]
                 ekle(f_obj5)
 
@@ -614,9 +604,10 @@ try:
             rol = gorev.get("unvan","").lower()
             if "tez" in rol or "danışman" in rol:
                 kod = "17.1" if "doktora" in rol else "17.2"
+                g_metin = " ".join(str(v) for v in gorev.values() if isinstance(v, str))
                 f_obj5 = t.Faaliyet(kod=kod, adet=1,
-                                    docent_sonrasi=_docent_sonrasi_mi(m))
-                f_obj5._kunye = m[:300]
+                                    docent_sonrasi=_docent_sonrasi_mi(g_metin))
+                f_obj5._kunye = g_metin[:300]
                 ekle(f_obj5)
 
         _st2.session_state["_aves_tekrarlar"] = tekrarlar
@@ -996,6 +987,11 @@ def _aday_olustur() -> t.AdayBilgi:
         uak_docent=bool(st.session_state.get("v_uak", False)),
         sifahi_sinav_basarili=bool(st.session_state.get("v_sifahi", False)),
         doktora_sonrasi_ders_yari_yil=int(st.session_state.get("v_ders", 0)),
+        ders_yillik_program_yil=int(st.session_state.get("v_ders_yil", 0)),
+        doktora_tarihi=st.session_state.get("v_doktora_t") if kadro == "docent" else None,
+        yeniden_puan_muafiyeti=(st.session_state.get("v_muafiyet", "") or "")
+        if kadro == "dr_yeniden" else "",
+        bir_yil_atama_sayisi=int(st.session_state.get("v_bir_yil", 1)),
         docent_sonrasi_sure_yil=float(st.session_state.get("v_docsure", 0.0)),
         docent_basvuru_tarihi=st.session_state.get("v_docent_basvuru"),
         docent_unvan_tarihi=st.session_state.get("v_docent_unvan"),
@@ -1186,7 +1182,7 @@ def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
     elems = []
     elems.append(Paragraph("TEKIRDAG NAMIK KEMAL UNIVERSITESI", s_title))
     elems.append(Paragraph("Ogretim Uyeligi - Atama Puanlama Raporu", s_sub))
-    elems.append(Paragraph("EYS-YNG-129  |  28.03.2025", s_xs))
+    elems.append(Paragraph("EYS-YNG-129  |  Rev. 2 · 10.08.2026", s_xs))
     elems.append(HRFlowable(width="100%", thickness=2,
                              color=colors.HexColor("#2E5DA3")))
     elems.append(Spacer(1, 8))
@@ -1498,7 +1494,7 @@ def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
 st.markdown("""
 <div class="header-bar">
   <h2>🎓&nbsp; TNKÜ &nbsp;·&nbsp; Öğretim Üyeliği Atama Puanlama Sistemi</h2>
-  <small>EYS-YNG-129 &nbsp;·&nbsp; 28.03.2025 &nbsp;·&nbsp;
+  <small>EYS-YNG-129 &nbsp;·&nbsp; Rev. 2 · 10.08.2026 &nbsp;·&nbsp;
   Tekirdağ Namık Kemal Üniversitesi</small>
 </div>
 """, unsafe_allow_html=True)
@@ -1557,6 +1553,26 @@ with tab1:
             st.selectbox("Yeniden Atama Süresi", key="v_sure",
                          options=[3, 2, 1],
                          format_func=lambda x: f"{x} Yıl")
+            st.selectbox("Puan şartı aranmayan durum (Md. 9(2))", key="v_muafiyet",
+                         options=["", "saglik", "docent_ilk_uzatim"],
+                         format_func=lambda x: {
+                             "": "Yok",
+                             "saglik": "(b) Heyet raporlu sağlık sorunu (rapor süresi ilavesi)",
+                             "docent_ilk_uzatim": "(c) ÜAK doçent unvanı sonrası ilk uzatım (3 yıl)",
+                         }[x])
+            if st.session_state.get("v_sure") == 1:
+                st.number_input("Kaçıncı 1 yıllık yeniden atama (bu dahil)", key="v_bir_yil",
+                                min_value=1, max_value=10, value=1, step=1,
+                                help="EK-1 (d): %25 kitap sınırı 1 yıllık yeniden atamada en "
+                                     "fazla iki kez uygulanmaz.")
+        if st.session_state.get("v_kadro") == "docent":
+            st.date_input(
+                "Doktora / uzmanlık / sanatta yeterlilik tarihi",
+                value=None, key="v_doktora_t",
+                min_value=datetime.date(1970, 1, 1),
+                max_value=datetime.date.today(), format="DD.MM.YYYY",
+                help="Md. 10(4): yalnızca bu tarihten sonraki yayın ve faaliyetler puanlanır "
+                     "(faaliyetlere yayın tarihi girilmelidir).")
         if st.session_state.get("v_kadro") == "profesor":
             _dt1, _dt2c = st.columns(2)
             with _dt1:
@@ -1659,7 +1675,11 @@ with tab1:
     with dl2:
         st.number_input("Farklı yarıyıl ders sayısı", key="v_ders",
                         min_value=0, max_value=60, step=1,
-                        help="Doçent ve Prof. için ≥4 farklı yarıyıl gerekli")
+                        help="Doçent: doktora sonrası; Profesör: ÜAK doçent unvanı sonrası "
+                             "≥4 farklı yarıyıl (Md. 10(3), 11(7))")
+        st.number_input("Yıllık programda ders verilen farklı yıl", key="v_ders_yil",
+                        min_value=0, max_value=40, step=1,
+                        help="Yıllık programlarda ≥2 farklı yıl, 4 yarıyıl yerine geçer")
     with dl3:
         st.number_input("Doçent sonrası yükseköğretim süresi (yıl)", key="v_docsure",
                         min_value=0.0, max_value=40.0, step=0.5,
@@ -1696,6 +1716,12 @@ with tab1:
         st.warning(f"⚠️ **{_tekrar}**, AVES'te **{_tutulan}** ile aynı eser olarak "
                    f"kayıtlı; yalnızca {_tutulan} alındı (her eser bir kez puanlanır). "
                    f"— {_kunye}…")
+    _sch = st.session_state.get("_aves_scholar")
+    if _sch and any(_sch):
+        st.info(f"ℹ️ Google Scholar: {_sch[0]} atıf, h-endeks {_sch[1]}. Bunlar faaliyet olarak "
+                "eklenmedi: EK-2 5.1 yalnızca SCI/SSCI/AHCI dergilerindeki (öz atıf hariç) "
+                "atıfları, 5.9 ise yalnızca Web of Science h-endeksini sayar. Atıfları WoS "
+                "dışa aktarımı / kanıt klasörüyle, h-endeksi 5.9 olarak elle girin.")
 
     ba1, ba2, ba3 = st.columns([2, 2, 1])
     with ba1:
@@ -1771,8 +1797,7 @@ with tab2:
 
         ilgili = sorted(
             [(k, v) for k, v in t.EK2_PUANLAR.items() if v["grup"] == grup_no],
-            key=lambda x: [int(s) if s.isdigit() else s
-                           for s in x[0].replace(".", " ").split()],
+            key=lambda x: t.kod_sirasi(x[0]),
         )
 
         if not ilgili:
@@ -1788,7 +1813,9 @@ with tab2:
             secili_kod = faaliyet_options[secili_label]
             bilgi      = t.EK2_PUANLAR[secili_kod]
 
-            adet_label = "Yıl" if grup_no == 18 else "Adet"
+            adet_label = ("Dönem (son üç yılda, her dönem için)" if secili_kod == "17.4"
+                          else "Adet (kongre/sempozyum)" if secili_kod == "18.8"
+                          else "Yıl" if grup_no == 18 else "Adet")
             adet: int  = st.number_input(adet_label, min_value=1,
                                          max_value=999, value=1, key="v_adet")
 
@@ -1812,7 +1839,7 @@ with tab2:
             q_val: str | None = None
             if bilgi.get("q_carpan"):
                 q_val = st.radio("Dergi Kuartili (Q)",
-                                 options=["Q1", "Q2", "Q3", "Q4"],
+                                 options=["Q1", "Q2", "Q3", "Q4"], index=3,
                                  horizontal=True, key="v_q",
                                  help="Q1→x2  |  Q2→x1.5  |  Q3→x1.25  |  Q4→x1")
 
@@ -1821,6 +1848,22 @@ with tab2:
                 patent_durum = PATENT_MAP[st.radio(
                     "Patent Durumu", options=list(PATENT_MAP.keys()),
                     horizontal=True, key="v_patent")]
+
+            yl_juri, ulusl, ekip = False, False, 1
+            if secili_kod == "17.3":
+                yl_juri = st.checkbox("Yüksek lisans jürisi (yarı puan)", key="v_yl_juri",
+                                      help="EK-2 17.3: doktorada tam, yüksek lisansta yarı puan")
+            if secili_kod == "11.10":
+                ulusl = st.checkbox("Uluslararası danışmanlık (2 katı)", key="v_ulusl")
+            uak_kalem = ""
+            if secili_kod == "17.4" and _uak_seti():
+                if st.checkbox("Lisansüstü ders (ÜAK 9a: dönem başına 3 puan)", key="v_lu_ders"):
+                    uak_kalem = "9a"
+            if secili_kod in t.EKIP_ODUL_KODLARI:
+                ekip = st.number_input("Ekipteki kişi sayısı", min_value=1, max_value=100,
+                                       value=1, key="v_ekip",
+                                       help="EK-2 14.9–14.12: ekibin aldığı ödüller paylaştırılır "
+                                            "(eşit pay)")
 
             ex1, ex2 = st.columns(2)
             ikinci_dan = False
@@ -1836,7 +1879,7 @@ with tab2:
 
             yayin_t = None
             baslica = False
-            if st.session_state.get("v_kadro") == "profesor":
+            if st.session_state.get("v_kadro") in ("profesor", "docent"):
                 yt1, yt2 = st.columns(2)
                 with yt1:
                     yayin_t = st.date_input(
@@ -1844,7 +1887,7 @@ with tab2:
                         min_value=datetime.date(1970, 1, 1),
                         max_value=datetime.date.today(), format="DD.MM.YYYY")
                 with yt2:
-                    if grup_no in {1, 2}:
+                    if grup_no in {1, 2} and st.session_state.get("v_kadro") == "profesor":
                         baslica = st.checkbox(
                             "★ Başlıca Araştırma Eseri", key="v_baslica_f",
                             help="Md. 11(5): doçentlik unvanından sonra, ALAN-1 için "
@@ -1889,6 +1932,8 @@ with tab2:
                 ikinci_danisман=ikinci_dan, docent_sonrasi=docsn,
                 yayin_tarihi=yayin_t, baslica_eser=baslica, tezden_uretilmis=tezden,
                 uak_baslica_yazar=uak_bsl,
+                yuksek_lisans=yl_juri, uluslararasi=ulusl, ekip_sayisi=int(ekip),
+                uak_kalem=uak_kalem,
             )
             p_tmp, _ = t.faaliyet_puan_hesapla(f_tmp)
             p1_mi    = t.is_puan1(secili_kod,
@@ -1918,6 +1963,8 @@ with tab2:
                         ikinci_danisман=ikinci_dan, docent_sonrasi=docsn,
                         yayin_tarihi=yayin_t, baslica_eser=baslica, tezden_uretilmis=tezden,
                         uak_baslica_yazar=uak_bsl,
+                        yuksek_lisans=yl_juri, uluslararasi=ulusl, ekip_sayisi=int(ekip),
+                        uak_kalem=uak_kalem,
                     )
                     _f_yeni._kunye = (kunye_giris or "").strip()
                     st.session_state.faaliyetler.append(_f_yeni)
