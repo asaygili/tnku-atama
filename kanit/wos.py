@@ -457,8 +457,10 @@ def indirilecek_listesi(arsiv: KanitArsivi) -> Path | None:
                                  str(alt)])
     yol = arsiv.kok / INDIRILECEK_LISTESI
     if not satirlar:
-        if yol.exists():
-            yol.unlink()
+        try:
+            yol.unlink(missing_ok=True)
+        except PermissionError:          # Excel'de açık: bir sonraki güncellemede silinir
+            pass
         return None
     from openpyxl import Workbook
     wb = Workbook()
@@ -479,5 +481,13 @@ def indirilecek_listesi(arsiv: KanitArsivi) -> Path | None:
         ws.column_dimensions[col].width = w
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = ws.dimensions
-    wb.save(yol)
+    try:
+        wb.save(yol)
+    except PermissionError:
+        # Liste Excel'de açıkken Windows dosyayı kilitler: güncel liste yanına yazılır
+        yol = yol.with_name(yol.stem + " (güncel).xlsx")
+        try:
+            wb.save(yol)
+        except PermissionError:
+            return None
     return yol

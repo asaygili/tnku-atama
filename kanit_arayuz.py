@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from datetime import date
 from pathlib import Path
 
@@ -349,6 +350,10 @@ def _wos_bolumu(a: KanitArsivi):
                 st.session_state.pop("_kt_atiflar", None)
                 st.success(f"Yerleştirilen: {sayac['yerleştirildi']} · eşleşmeyen PDF: "
                            f"{sayac['eşleşmedi']}")
+                guncel = a.kok / (Path(wos.INDIRILECEK_LISTESI).stem + " (güncel).xlsx")
+                if guncel.exists() and guncel.stat().st_mtime > time.time() - 60:
+                    st.info(f"{wos.INDIRILECEK_LISTESI} Excel'de açık olduğu için güncel liste "
+                            f"'{guncel.name}' adıyla kaydedildi.")
     yuklenen = st.file_uploader("WoS dışa aktarım dosyası (.txt / .xlsx)", type=["txt", "xlsx"],
                                 accept_multiple_files=True, key="kt_wos_dosya")
     if not yuklenen:

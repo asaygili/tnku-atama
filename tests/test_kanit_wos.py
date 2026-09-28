@@ -172,6 +172,22 @@ class Wos(unittest.TestCase):
         self.assertEqual(indir.yayinci_pdf_deseni("10.7717/peerj-cs.3530", "https://peerj.com/articles/cs-3530/"),
                          ["https://peerj.com/articles/cs-3530.pdf"])
 
+    def test_liste_excelde_acikken(self):
+        from unittest import mock
+        from openpyxl import Workbook
+        a = KanitArsivi(self.kok)
+        wos.uygula(wos.plan_olustur(a, wos.oku(self.dosya), "Yılmaz"), a, indir=False)
+        asil = Workbook.save
+
+        def kilitli(wb, yol):
+            if Path(yol).name == wos.INDIRILECEK_LISTESI:
+                raise PermissionError(13, "Permission denied")
+            return asil(wb, yol)
+        with mock.patch.object(Workbook, "save", kilitli):
+            yol = wos.indirilecek_listesi(KanitArsivi(self.kok))
+        self.assertEqual(yol.name, "_indirilecek_atiflar (güncel).xlsx")
+        self.assertTrue(yol.exists())
+
     def test_kayitlari_guncelle(self):
         a = KanitArsivi(self.kok)
         plan = wos.plan_olustur(a, wos.oku(self.dosya), "Yılmaz")
