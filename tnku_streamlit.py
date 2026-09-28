@@ -1304,6 +1304,24 @@ def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
                                    s_xs))
         elems.append(Spacer(1, 10))
 
+    # Kanıt denetimi (yalnızca yerelde, kanıt klasörü varsa)
+    from kanit.denetim import denetle as _denetle
+    _uyarilar = _denetle(aday.faaliyetler, ka.arsiv())
+    if ka.arsiv() is not None:
+        elems.append(Paragraph("KANIT DENETIMI", s_sec))
+        if not _uyarilar:
+            elems.append(Paragraph(_xml_escape("Puan alan tüm faaliyetlerin kanıtları kanıt "
+                                               "klasöründe bulunmaktadır."), s_xs))
+        else:
+            ddata = [["#", "AVES", "EK-2", "Eksik kanıt"]]
+            for u in _uyarilar:
+                ddata.append([str(u.sira), u.aves_kod or "–", u.kod,
+                              Paragraph(_xml_escape(" · ".join(u.eksikler)), s_kc)])
+            dt_ = Table(ddata, repeatRows=1, colWidths=[0.8*cm, 1.4*cm, 1.2*cm, 14*cm])
+            dt_.setStyle(tbl_style(colors.HexColor("#B45309")))
+            elems.append(dt_)
+        elems.append(Spacer(1, 10))
+
     elems.append(Paragraph("FAALIYET DETAYI", s_sec))
 
     # Faaliyet listesinden künye haritası oluştur (kod → künye)
@@ -1905,6 +1923,9 @@ with tab2:
                     st.session_state.faaliyetler.append(_f_yeni)
                     st.rerun()
 
+    # ── Kanıt klasöründen doldurma (yalnızca yerelde) ────────────────────────
+    ka.doldurma_bolumu(ka.arsiv())
+
     # ── Eklenen Faaliyetler ──────────────────────────────────────────────────
     st.divider()
     flist    = st.session_state.faaliyetler
@@ -2293,6 +2314,11 @@ if sonuc is not None and son_aday is not None:
         )
 
     st.divider()
+
+    # ── Kanıt denetimi (yalnızca yerelde) ───────────────────────────────────
+    if ka.arsiv() is not None:
+        ka.denetim_bolumu(son_aday.faaliyetler, ka.arsiv())
+        st.divider()
 
     # ── ÜAK doçentlik kriterleri (Md. 11(2)) ────────────────────────────────
     uak_s = sonuc.get("uak")
