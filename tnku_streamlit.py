@@ -2315,9 +2315,11 @@ if sonuc is not None and son_aday is not None:
 
     st.divider()
 
-    # ── Kanıt denetimi (yalnızca yerelde) ───────────────────────────────────
+    # ── Kanıt denetimi ve başvuru dosyası (yalnızca yerelde) ────────────────
     if ka.arsiv() is not None:
         ka.denetim_bolumu(son_aday.faaliyetler, ka.arsiv())
+        st.divider()
+        ka.paket_bolumu(son_aday, sonuc, ka.arsiv(), _pdf_bytes)
         st.divider()
 
     # ── ÜAK doçentlik kriterleri (Md. 11(2)) ────────────────────────────────

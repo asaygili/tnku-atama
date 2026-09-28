@@ -408,3 +408,86 @@ def denetim_bolumu(faaliyetler, a: KanitArsivi | None) -> list:
                                 "Faaliyet": u.ad[:45], "Eksik": " · ".join(u.eksikler)}
                                for u in uyarilar]), hide_index=True, use_container_width=True)
     return uyarilar
+
+
+# ── Aşama 3: başvuru dosyası (USB klasörü + birleşik PDF) ──────────────────
+GENEL_BELGE_KLASORLERI = ("_Docentlik_Basvuru_Belgeleri", "_Kisisel_Belgeler", "_Genel_Belgeler",
+                          "_Atama_2019_Basvuru_Belgeleri")
+GENEL_BELGE_ONSECIM = ("yabanci dil", "yabancı dil", "doktora", "diploma", "docentlik belgesi",
+                       "doçentlik belgesi", "ozgecmis", "özgeçmiş")
+
+
+def _genel_belge_adaylari(a: KanitArsivi) -> list[Path]:
+    sonuc = []
+    for ad in GENEL_BELGE_KLASORLERI:
+        d = a.kok / ad
+        if d.is_dir():
+            sonuc += sorted(p for p in d.rglob("*") if p.is_file()
+                            and p.suffix.lower() in (".pdf", ".jpg", ".jpeg", ".png", ".docx", ".doc"))
+    return sonuc
+
+
+def paket_bolumu(aday, sonuc, a: KanitArsivi | None, rapor_pdf) -> None:
+    """Sonuç ekranında başvuru dosyası hazırlama. rapor_pdf: (aday, sonuc) → bytes."""
+    if a is None:
+        return
+    from kanit import paket
+    st.markdown('<div class="card-title">BAŞVURU DOSYASI (USB KLASÖRÜ + BİRLEŞİK PDF)</div>',
+                unsafe_allow_html=True)
+    st.caption("Puan alan faaliyetler EK-2 sırasıyla, tam metin ve kanıtlarıyla birlikte hazırlanır "
+               "(Md. 6(1): fiziksel dosya + USB). Kaynak klasörlere dokunulmaz.")
+    s1, s2 = st.columns(2)
+    with s1:
+        atif_k = st.checkbox("Atıf kanıtlarını ekle", value=True, key="pk_atif")
+        oncesi = st.checkbox("Doçentlik başvurusu öncesi faaliyetleri de ekle", value=True,
+                             key="pk_oncesi")
+    with s2:
+        kitap = st.checkbox("Bildiri kitaplarının tamamını ekle (yoksa kesilmiş sayfalar)",
+                            value=False, key="pk_kitap")
+        hafif = st.checkbox("Birleşik PDF'i hafiflet (taranmış belgeler 110 dpi)", value=True,
+                            key="pk_hafif", help="USB klasöründeki dosyalar özgün kalır; tam "
+                                                  "metinlere dokunulmaz.")
+    adaylar = _genel_belge_adaylari(a)
+    onsecim = [p for p in adaylar
+               if any(x in p.name.lower().replace("ı", "i") for x in GENEL_BELGE_ONSECIM)]
+    genel = st.multiselect("Genel belgeler (dosyanın başına eklenir)", options=adaylar,
+                           default=onsecim, key="pk_genel",
+                           format_func=lambda p: str(p.relative_to(a.kok)))
+    cikti = st.text_input("Çıktı klasörü", value=str(a.kok / "_Basvuru_Dosyalari"),
+                          key="pk_cikti")
+    if st.button("📦 Başvuru dosyasını hazırla", type="primary", key="pk_hazirla"):
+        ayar = paket.PaketAyarlari(atif_kanitlari=atif_k, docent_oncesi=oncesi,
+                                   tam_bildiri_kitabi=kitap, hafiflet=hafif, genel_belgeler=genel)
+        with st.spinner("Başvuru dosyası hazırlanıyor… (büyük arşivlerde birkaç dakika sürebilir)"):
+            try:
+                st.session_state["_pk_sonuc"] = paket.paket_olustur(
+                    aday, sonuc, a, Path(cikti), rapor_pdf(aday, sonuc), ayar)
+            except Exception as e:  # noqa: BLE001 – kullanıcıya göster
+                st.session_state["_pk_sonuc"] = None
+                st.error(f"Başvuru dosyası hazırlanamadı: {e}")
+    ps = st.session_state.get("_pk_sonuc")
+    if ps is None:
+        return
+    usb_mb = sum(p.stat().st_size for p in ps.klasor.rglob("*") if p.is_file()) / 1e6
+    st.success(f"✅ {len(ps.kalemler)} faaliyet · birleşik PDF {ps.sayfa} sayfa, "
+               f"{ps.boyut_mb:.0f} MB · USB klasörü {usb_mb:.0f} MB\n\n`{ps.klasor}`")
+    b1, b2 = st.columns(2)
+    with b1:
+        if st.button("📂 Klasörü aç", key="pk_klasor_ac", use_container_width=True):
+            dosya_ac(ps.klasor)
+    with b2:
+        if st.button("📄 Birleşik PDF'i aç", key="pk_pdf_ac", use_container_width=True):
+            dosya_ac(ps.pdf)
+    eksikli = [k for k in ps.kalemler if k.eksikler or not k.dosyalar]
+    if eksikli:
+        st.warning(f"{len(eksikli)} faaliyetin kanıtı eksik; klasörlerine EKSIK.txt yazıldı.")
+    yanlis = [y for k in ps.kalemler for y in k.yanlis_yer]
+    if yanlis:
+        with st.expander(f"Başka bir yayına ait göründüğü için dahil edilmeyen {len(yanlis)} dosya"):
+            st.caption("Bu dosyalar kanıt arşivinde yanlış klasörde duruyor olabilir.")
+            for y in yanlis:
+                st.caption(y)
+    if ps.pdf_disi:
+        with st.expander(f"Birleşik PDF'e alınmayan {len(ps.pdf_disi)} dosya (USB'de mevcut)"):
+            for y in ps.pdf_disi:
+                st.caption(y)
