@@ -39,6 +39,11 @@ def main(argv=None):
     a.add_argument("--esci", action="store_true", help="ESCI (5.2) ve BKCI (5.7) atıflarını da ekle")
     a.add_argument("--indirme", action="store_true", help="açık erişimli tam metinleri indirme")
     a.add_argument("--uygula", action="store_true", help="klasörleri oluştur (yoksa yalnızca plan)")
+    a = alt.add_parser("atif-yerlestir",
+                       help="tarayıcıdan indirilen atıf PDF'lerini DOI/başlığa göre klasörlere koy")
+    a.add_argument("klasor", help="indirilen PDF'lerin bulunduğu klasör (örn. İndirilenler)")
+    a.add_argument("--kok")
+    a.add_argument("--tasi", action="store_true", help="yerleştirilen dosyaları kaynaktan sil")
     a = alt.add_parser("arsivden-ekle")
     a.add_argument("kok", nargs="?")
     a.add_argument("--kaynak", action="append", default=[], metavar="AD=YOL")
@@ -84,6 +89,9 @@ def main(argv=None):
                 print("İndirilecek tam metinler:", arsiv.kok / wos.INDIRILECEK_LISTESI)
         else:
             print("Klasörleri oluşturmak için --uygula ekleyin.")
+    elif ns.komut == "atif-yerlestir":
+        from . import wos
+        print(dict(wos.indirilenleri_yerlestir(arsiv, Path(ns.klasor), tasi=ns.tasi)))
     elif ns.komut == "arsivden-ekle":
         from .arsivden import kurallari_oku, plan_olustur, uygula
         kaynaklar = dict(k.split("=", 1) for k in ns.kaynak)

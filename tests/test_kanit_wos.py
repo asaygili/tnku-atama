@@ -154,6 +154,24 @@ class Wos(unittest.TestCase):
         self.assertEqual(kalem["atif:5.7:sonrası:bolum"], "5b")
         self.assertEqual(kalem["atif:5.7:sonrası"], "5a")
 
+    def test_indirilenleri_yerlestir_ve_desen(self):
+        from kanit import indir
+        a = KanitArsivi(self.kok)
+        wos.uygula(wos.plan_olustur(a, wos.oku(self.dosya), "Yılmaz"), a, indir=False)
+        ind = self.kok / "_indirilen"
+        pdf_yaz(ind / "makale1.pdf", ["A new citing study of retinal images", "b", "c"])
+        pdf_yaz(ind / "ilgisiz.pdf", ["Başka bir yayın doi:10.1/zzz", "b", "c"])
+        sayac = wos.indirilenleri_yerlestir(KanitArsivi(self.kok), ind)
+        self.assertEqual((sayac["yerleştirildi"], sayac["eşleşmedi"]), (1, 1))
+        yerlesen = list((self.um01 / "atiflar").glob("WoS_*/atif_yapan.pdf"))
+        self.assertEqual(len(yerlesen), 1)
+        self.assertFalse((yerlesen[0].parent / "INDIRILECEK.txt").exists())
+        self.assertTrue((ind / "makale1.pdf").exists())                    # kopyalanır
+        self.assertEqual(indir.yayinci_pdf_deseni("10.3390/app1", "https://www.mdpi.com/2076-3417/15/5/2752"),
+                         ["https://www.mdpi.com/2076-3417/15/5/2752/pdf"])
+        self.assertEqual(indir.yayinci_pdf_deseni("10.7717/peerj-cs.3530", "https://peerj.com/articles/cs-3530/"),
+                         ["https://peerj.com/articles/cs-3530.pdf"])
+
     def test_kayitlari_guncelle(self):
         a = KanitArsivi(self.kok)
         plan = wos.plan_olustur(a, wos.oku(self.dosya), "Yılmaz")

@@ -365,22 +365,71 @@ def kayitlari_guncelle(arsiv: KanitArsivi, kayitlar: list[WosKaydi]) -> int:
 
 
 def eksikleri_indir(arsiv: KanitArsivi, ilerleme=None) -> Counter:
-    """INDIRILECEK.txt bulunan WoS atıf klasörleri için açık erişimli tam metni yeniden dener."""
-    from .indir import acik_erisim, oturum, pdf_indir
+    """INDIRILECEK.txt bulunan WoS atıf klasörleri için açık erişimli tam metni yeniden dener.
+
+    Bulunan PDF adresi, açık erişim durumu ve sitenin bot koruması kayit.json'a yazılır;
+    indirilemeyenler listede tarayıcıdan tek tıkla indirilecek bağlantıyla yer alır."""
+    from .indir import oturum, pdf_adaylari, pdf_indir
     bekleyen = [alt for kay in arsiv.kayitlar for alt in kay.atif_klasorleri()
                 if (alt / "INDIRILECEK.txt").exists()]
-    s, sayac = oturum(), Counter()
+    s, sayac, onbellek = oturum(), Counter(), {}
     for i, alt in enumerate(bekleyen, 1):
         if ilerleme:
             ilerleme(i, len(bekleyen), alt)
+        indi = False
         try:
-            doi = json.loads((alt / "kayit.json").read_text(encoding="utf-8")).get("doi")
-            indi = bool(doi) and any(pdf_indir(url, alt / "atif_yapan.pdf", s, deneme=2)[0]
-                                     for url in acik_erisim(doi, s)["pdf"])
+            kj = alt / "kayit.json"
+            v = json.loads(kj.read_text(encoding="utf-8"))
+            doi = v.get("doi")
+            if doi:
+                aday = onbellek.get(doi) or pdf_adaylari(doi, s)
+                onbellek[doi] = aday
+                indi = any(pdf_indir(u, alt / "atif_yapan.pdf", s, deneme=1)[0]
+                           for u in aday["pdf"])
+                v.update({"acik_erisim": aday["durum"], "pdf_adresi": (aday["pdf"] or [""])[-1],
+                          "yayinci_sayfasi": aday["sayfa"], "bot_korumali": aday["korumali"]})
+                kj.write_text(json.dumps(v, ensure_ascii=False, indent=1), encoding="utf-8")
         except Exception:  # noqa: BLE001
             indi = False
         sayac["indirildi" if indi else "indirilemedi"] += 1
     indirilecek_listesi(arsiv)                   # indirilenlerin INDIRILECEK.txt'si silinir
+    return sayac
+
+
+def indirilenleri_yerlestir(arsiv: KanitArsivi, klasor: Path, tasi: bool = False) -> Counter:
+    """Tarayıcıdan indirilen PDF'leri (örn. İndirilenler klasörü) ilk sayfalarındaki DOI'ye
+    ya da başlığa göre bekleyen WoS atıf klasörlerine atif_yapan.pdf olarak koyar.
+    Aynı yayın birden çok eserinize atıf yaptıysa her klasöre kopyalanır."""
+    import shutil
+    bekleyen: dict[str, list[Path]] = {}
+    basliklar: dict[str, list[Path]] = {}
+    for kay in arsiv.kayitlar:
+        for alt in kay.atif_klasorleri():
+            if not (alt / "INDIRILECEK.txt").exists():
+                continue
+            try:
+                v = json.loads((alt / "kayit.json").read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if v.get("doi"):
+                bekleyen.setdefault(v["doi"].lower(), []).append(alt)
+            if len(norm(v.get("baslik", ""))) > 25:
+                basliklar.setdefault(norm(v["baslik"])[:80], []).append(alt)
+    sayac = Counter()
+    for p in sorted(Path(klasor).glob("*.pdf")):
+        metin = pdf_metin(p, 2)[:8000]
+        hedefler = bekleyen.get(doi_bul(metin)) or next(
+            (v for b, v in basliklar.items() if b in norm(metin)), None)
+        if not hedefler:
+            sayac["eşleşmedi"] += 1
+            continue
+        for alt in hedefler:
+            if not (alt / "atif_yapan.pdf").exists():
+                shutil.copy2(p, alt / "atif_yapan.pdf")
+                sayac["yerleştirildi"] += 1
+        if tasi:
+            p.unlink()
+    indirilecek_listesi(arsiv)
     return sayac
 
 
@@ -398,8 +447,13 @@ def indirilecek_listesi(arsiv: KanitArsivi) -> Path | None:
                     v = json.loads((alt / "kayit.json").read_text(encoding="utf-8"))
                 except (OSError, json.JSONDecodeError):
                     v = {}
+                oa = v.get("acik_erisim")
+                durum = ("Açık erişim – tarayıcıdan indirin" if oa and oa != "closed"
+                         else "Ücretli – kurum erişimi gerekir" if oa == "closed" else "")
                 satirlar.append([kay.aves_kod, v.get("baslik", alt.name), v.get("dergi", ""),
-                                 v.get("yil", ""), f"https://doi.org/{v['doi']}" if v.get("doi") else "",
+                                 v.get("yil", ""), durum,
+                                 v.get("pdf_adresi") or "",
+                                 f"https://doi.org/{v['doi']}" if v.get("doi") else "",
                                  str(alt)])
     yol = arsiv.kok / INDIRILECEK_LISTESI
     if not satirlar:
@@ -410,10 +464,20 @@ def indirilecek_listesi(arsiv: KanitArsivi) -> Path | None:
     wb = Workbook()
     ws = wb.active
     ws.title = "İndirilecek atıflar"
-    ws.append(["Atıf yapılan", "Atıf yapan yayın", "Dergi", "Yıl", "DOI bağlantısı", "Klasör"])
+    ws.append(["Atıf yapılan", "Atıf yapan yayın", "Dergi", "Yıl", "Erişim", "PDF bağlantısı",
+               "DOI bağlantısı", "Klasör"])
+    # açık erişimliler üstte: tarayıcıda tıklayıp indirmek yeterli
+    satirlar.sort(key=lambda r: (not r[4].startswith("Açık"), r[0]))
     for r in satirlar:
         ws.append(r)
-    for col, w in zip("ABCDEF", (10, 70, 35, 6, 40, 80)):
+        for sutun in (6, 7):
+            h = ws.cell(ws.max_row, sutun)
+            if h.value:
+                h.hyperlink = h.value
+                h.style = "Hyperlink"
+    for col, w in zip("ABCDEFGH", (10, 60, 30, 6, 30, 45, 35, 70)):
         ws.column_dimensions[col].width = w
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = ws.dimensions
     wb.save(yol)
     return yol

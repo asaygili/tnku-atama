@@ -328,11 +328,27 @@ def _wos_bolumu(a: KanitArsivi):
     st.caption("WoS: yayınlarınız → Create Citation Report → Citing articles (Without self-citations) "
                "→ Web of Science Index süzgeci (SCI-EXPANDED, SSCI, A&HCI, ESCI, BKCI) → Export → "
                "'Tab delimited file', Record content: 'Full Record and Cited References'.")
-    if (a.kok / wos.INDIRILECEK_LISTESI).exists() and st.button(
-            "Tam metni eksik atıflar için açık erişimi yeniden dene", key="kt_wos_yeniden"):
-        cubuk = st.progress(0.0, text="Açık erişim aranıyor…")
-        sayac = wos.eksikleri_indir(a, ilerleme=lambda i, n, p: cubuk.progress(i / n, text=f"{i}/{n}"))
-        st.success(f"İndirilen: {sayac['indirildi']} · hâlâ eksik: {sayac['indirilemedi']}")
+    if (a.kok / wos.INDIRILECEK_LISTESI).exists():
+        if st.button("Tam metni eksik atıflar için açık erişimi yeniden dene", key="kt_wos_yeniden"):
+            cubuk = st.progress(0.0, text="Açık erişim aranıyor…")
+            sayac = wos.eksikleri_indir(
+                a, ilerleme=lambda i, n, p: cubuk.progress(i / n, text=f"{i}/{n}"))
+            st.success(f"İndirilen: {sayac['indirildi']} · hâlâ eksik: {sayac['indirilemedi']}")
+        st.caption(f"MDPI, PeerJ, Wiley gibi siteler otomatik indirmeyi engeller. "
+                   f"{wos.INDIRILECEK_LISTESI} listesindeki 'PDF bağlantısı'na tarayıcınızda "
+                   "tıklayıp indirin, sonra indirilen klasörü aşağıda seçin: PDF'ler DOI'lerine "
+                   "göre ilgili atıf klasörüne yerleştirilir.")
+        y1, y2 = st.columns([3, 1])
+        with y1:
+            ind = st.text_input("İndirilen PDF'lerin klasörü", key="kt_indirilen",
+                                value=str(Path.home() / "Downloads"))
+        with y2:
+            if st.button("Klasörlere yerleştir", key="kt_yerlestir",
+                         disabled=not Path(ind).is_dir()):
+                sayac = wos.indirilenleri_yerlestir(a, Path(ind))
+                st.session_state.pop("_kt_atiflar", None)
+                st.success(f"Yerleştirilen: {sayac['yerleştirildi']} · eşleşmeyen PDF: "
+                           f"{sayac['eşleşmedi']}")
     yuklenen = st.file_uploader("WoS dışa aktarım dosyası (.txt / .xlsx)", type=["txt", "xlsx"],
                                 accept_multiple_files=True, key="kt_wos_dosya")
     if not yuklenen:

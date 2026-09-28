@@ -35,6 +35,51 @@ def acik_erisim(doi: str, s=None) -> dict:
             "atif": w.get("cited_by_count")}
 
 
+def yayinci_pdf_deseni(doi: str, sayfa: str) -> list[str]:
+    """Yayıncının bilinen PDF adresi desenleri (sayfa: DOI'nin yönlendiği makale sayfası)."""
+    sayfa = (sayfa or "").split("?")[0].split("#")[0].rstrip("/")
+    d = (doi or "").lower()
+    adres = []
+    if "mdpi.com/" in sayfa:
+        adres.append(sayfa + "/pdf")
+    if "peerj.com/articles/" in sayfa:
+        adres.append(sayfa + ".pdf")
+    if "frontiersin.org/" in sayfa and not sayfa.endswith("/pdf"):
+        adres.append(sayfa.replace("/full", "") + "/pdf")
+    if d.startswith(("10.1007/", "10.1186/")):
+        adres.append(f"https://link.springer.com/content/pdf/{doi}.pdf")
+    if d.startswith(("10.1002/", "10.1111/")):
+        adres.append(f"https://onlinelibrary.wiley.com/doi/pdfdirect/{doi}")
+    if d.startswith("10.1080/"):
+        adres.append(f"https://www.tandfonline.com/doi/pdf/{doi}")
+    if d.startswith("10.1155/"):
+        adres.append(f"https://downloads.hindawi.com/journals/{doi}.pdf")
+    return adres
+
+
+def pdf_adaylari(doi: str, s=None) -> dict:
+    """Tam metin adayları: OpenAlex PDF konumları + yayıncı sayfasındaki citation_pdf_url
+    etiketi + yayıncıya özgü desenler. Bot korumalı sitelerde (403 / "Just a moment")
+    indirme denenmez; bulunan adres yine de kullanıcının tarayıcıdan indirmesi için döner."""
+    from bs4 import BeautifulSoup
+    s = s or oturum()
+    oa = acik_erisim(doi, s)
+    adres, sayfa, korumali = list(oa["pdf"]), "", False
+    try:
+        r = s.get(f"https://doi.org/{doi}", timeout=30)
+        sayfa = r.url
+        korumali = r.status_code in (401, 403, 429) or "Just a moment" in r.text[:3000]
+        if r.status_code == 200 and not korumali:
+            m = BeautifulSoup(r.text, "html.parser").find("meta", attrs={"name": "citation_pdf_url"})
+            if m and m.get("content"):
+                adres.append(m["content"])
+    except Exception:  # noqa: BLE001
+        pass
+    adres += yayinci_pdf_deseni(doi, sayfa)
+    return {"durum": oa["durum"], "pdf": list(dict.fromkeys(adres)), "sayfa": sayfa,
+            "korumali": korumali}
+
+
 def drive_adresi(url: str) -> str:
     m = re.search(r"/d/([^/]+)", url) or re.search(r"id=([^&]+)", url)
     return f"https://drive.google.com/uc?export=download&id={m.group(1)}" if m else url

@@ -616,7 +616,8 @@ try:
                 h_kod, h_adet, h_yil = ay.hakemlik_ek2(o.get("endeks"), o.get("metin", ""),
                                                         o.get("tip", ""))
                 f_h = t.Faaliyet(kod=h_kod, adet=h_adet,
-                                 yayin_tarihi=datetime.date(h_yil, 12, 31) if h_yil else None,
+                                 yayin_tarihi=(min(datetime.date(h_yil, 12, 31),
+                                                   datetime.date.today()) if h_yil else None),
                                  docent_sonrasi=_docent_sonrasi_mi(o.get("metin", "")))
                 f_h._kunye = o.get("metin", "")[:300]
                 ekle(f_h)
@@ -2153,7 +2154,10 @@ with tab2:
                             "Yayın / faaliyet tarihi", value=f_d.yayin_tarihi,
                             key=f"yt_{didx}",
                             min_value=datetime.date(1970, 1, 1),
-                            max_value=datetime.date.today(), format="DD.MM.YYYY")
+                            # erken erişim / ileri tarihli sayı tarihleri de gösterilebilsin
+                            max_value=max(datetime.date.today(),
+                                          f_d.yayin_tarihi or datetime.date.today()),
+                            format="DD.MM.YYYY")
                     with de3:
                         yeni_bsl = st.checkbox(
                             "★ Başlıca Araştırma Eseri", value=f_d.baslica_eser,
