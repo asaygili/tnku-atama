@@ -325,6 +325,7 @@ try:
             ("Kitap Bölümü",                  "kitap_bolum"),
             ("Uluslararası Bilimsel Toplantı","ulusl_bildiri"),
             ("Ulusal Bilimsel Toplantı",      "ulusal_bildiri"),
+            ("Yayın Hakemlikleri",            "hakemlik"),
         ]
         def _kategori_key(baslik):
             for anahtar, key in KAT_MAP:
@@ -424,6 +425,21 @@ try:
         except Exception:
             pass
 
+        # İdari görevler (EK-2 18): unvan | kurum | yıllar
+        try:
+            r = sess.get(base + "/cv/idarigorevler/", timeout=10,
+                         headers={"Referer": referer})
+            if r.status_code == 200:
+                gorevler = []
+                for tr in _BS(r.text, "html.parser").find_all("tr"):
+                    tds = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
+                    if len(tds) >= 3 and tds[0]:
+                        gorevler.append({"unvan": tds[0], "kurum": tds[1], "tarih": tds[2]})
+                if gorevler:
+                    veri["_idari_gorev"] = gorevler
+        except Exception:
+            pass
+
         # Patent & Ödüller
         try:
             r = sess.get(base + "/cv/patentleroduller/", timeout=10,
@@ -462,7 +478,8 @@ try:
             yayin_yil = _yayin_yili_bul(metin_)
             return yayin_yil > docent_yil if yayin_yil > 0 else False
 
-        veri = _aves_yukle_cv(cv_url)
+        canli = bool(_st2.session_state.get("v_aves_canli", False))
+        veri = {} if canli else _aves_yukle_cv(cv_url)
         sch  = _aves_scholar_yukle(cv_url)
         if not veri:
             veri = _aves_canli_cek(cv_url)
@@ -581,16 +598,9 @@ try:
         if blok:
             for o in blok.get("ogeler", []):
                 m = o.get("metin","").lower()
-                yurt = any(x in m for x in ("yürütücü","koordinatör","pi "))
-                if "tubitak" in m or "tübitak" in m:
-                    kod = "12.5" if yurt else "12.6"
-                elif any(x in m for x in ("ab ","h2020","horizon","fp7","erasmus")):
-                    kod = "12.1" if yurt else "12.2"
-                elif "bap" in m:
-                    kod = "12.11" if yurt else "12.12"
-                else:
-                    kod = "12.13" if yurt else "12.14"
-                f_obj5 = t.Faaliyet(kod=kod, adet=1,
+                kod, p_bas, p_bit, p_devam = ay.proje_ek2(o.get("metin", ""))
+                f_obj5 = t.Faaliyet(kod=kod, adet=1, devam_ediyor=p_devam,
+                                    yayin_tarihi=(p_bas if p_devam else p_bit),
                                     docent_sonrasi=_docent_sonrasi_mi(m))
                 # ÜAK 7a/7b yalnızca AB Çerçeve Programı; diğer AB destekli projeler 7c
                 if kod in ("12.1", "12.2") and not any(
@@ -598,6 +608,26 @@ try:
                     f_obj5.uak_kalem = "7c"
                 f_obj5._kunye = m[:300]
                 ekle(f_obj5)
+
+        # 6. Hakemlik (grup tavanı 20)
+        blok = veri.get("hakemlik")
+        if blok:
+            for o in blok.get("ogeler", []):
+                h_kod, h_adet, h_yil = ay.hakemlik_ek2(o.get("endeks"), o.get("metin", ""),
+                                                        o.get("tip", ""))
+                f_h = t.Faaliyet(kod=h_kod, adet=h_adet,
+                                 yayin_tarihi=datetime.date(h_yil, 12, 31) if h_yil else None,
+                                 docent_sonrasi=_docent_sonrasi_mi(o.get("metin", "")))
+                f_h._kunye = o.get("metin", "")[:300]
+                ekle(f_h)
+
+        # 18. İdari görevler (her bir yıl için)
+        for gorev in (veri.get("_idari_gorev") or []):
+            sonuc_i = ay.idari_ek2(gorev.get("unvan", ""), gorev.get("tarih", ""))
+            if sonuc_i and sonuc_i[1] > 0:
+                f_i = t.Faaliyet(kod=sonuc_i[0], adet=sonuc_i[1])
+                f_i._kunye = f"{gorev.get('unvan', '')} ({gorev.get('tarih', '')})"
+                ekle(f_i)
 
         # 17. Tez danışmanlığı
         for gorev in (veri.get("_akademik_gorev") or []):
@@ -1724,6 +1754,8 @@ with tab1:
                 "dışa aktarımı / kanıt klasörüyle, h-endeksi 5.9 olarak elle girin.")
 
     ba1, ba2, ba3 = st.columns([2, 2, 1])
+    st.checkbox("AVES'ten canlı çek (yerel önbelleği kullanma)", key="v_aves_canli",
+                help="İşaretlenmezse daha önce kaydedilmiş cv_data önbelleği varsa o kullanılır.")
     with ba1:
         if st.button("⚡ Yükle ve Ekle", type="primary",
                      use_container_width=True,
@@ -1865,6 +1897,12 @@ with tab2:
                                        help="EK-2 14.9–14.12: ekibin aldığı ödüller paylaştırılır "
                                             "(eşit pay)")
 
+            devam_p = False
+            if grup_no == 12:
+                devam_p = st.checkbox("Proje devam ediyor", key="v_devam",
+                                      help="EK-2 12: projeler tamamlanmış olmalıdır (puan almaz); "
+                                           "ÜAK 7 devam eden projeleri de sayar.")
+
             ex1, ex2 = st.columns(2)
             ikinci_dan = False
             with ex1:
@@ -1933,7 +1971,7 @@ with tab2:
                 yayin_tarihi=yayin_t, baslica_eser=baslica, tezden_uretilmis=tezden,
                 uak_baslica_yazar=uak_bsl,
                 yuksek_lisans=yl_juri, uluslararasi=ulusl, ekip_sayisi=int(ekip),
-                uak_kalem=uak_kalem,
+                uak_kalem=uak_kalem, devam_ediyor=devam_p,
             )
             p_tmp, _ = t.faaliyet_puan_hesapla(f_tmp)
             p1_mi    = t.is_puan1(secili_kod,
@@ -1964,7 +2002,7 @@ with tab2:
                         yayin_tarihi=yayin_t, baslica_eser=baslica, tezden_uretilmis=tezden,
                         uak_baslica_yazar=uak_bsl,
                         yuksek_lisans=yl_juri, uluslararasi=ulusl, ekip_sayisi=int(ekip),
-                        uak_kalem=uak_kalem,
+                        uak_kalem=uak_kalem, devam_ediyor=devam_p,
                     )
                     _f_yeni._kunye = (kunye_giris or "").strip()
                     st.session_state.faaliyetler.append(_f_yeni)

@@ -114,6 +114,33 @@ class AvesKodlari(unittest.TestCase):
         self.assertEqual(ay.kitap_ek2_kodu("kitap_ulusl", "x", "Bilimsel Kitap"), "2.2")
 
 
+class AvesHakemlikProjeIdari(unittest.TestCase):
+    def test_hakemlik(self):
+        self.assertEqual(ay.hakemlik_ek2(["SCI-Expanded"], "Symmetry, 2025, Hakemlik Sayısı:6.", "Dergi"),
+                         ("6.3", 6, 2025))
+        self.assertEqual(ay.hakemlik_ek2(["Scopus"], "X, 2023.", "Dergi")[:2], ("6.4", 1))
+        self.assertEqual(ay.hakemlik_ek2(["EBSCO"], "X, 2026.", "Dergi")[0], "6.5")
+
+    def test_proje(self):
+        bap = ("Retina, Yükseköğretim Kurumları tarafından destekli bilimsel araştırma projesi, "
+               "Yürütücü. 25.02.2025 - 31.03.2026.")
+        self.assertEqual(ay.proje_ek2(bap, date(2026, 9, 28)),
+                         ("12.11", date(2025, 2, 25), date(2026, 3, 31), False))
+        self.assertTrue(ay.proje_ek2(bap, date(2026, 1, 1))[3])          # bitişi gelmemiş
+        self.assertEqual(ay.proje_ek2("X, -Tübitak 3501, Araştırmacı. 01.11.2021 - 02.06.2025.")[0],
+                         "12.6")
+
+    def test_devam_eden_proje_puan_almaz(self):
+        self.assertEqual(puan(F("12.11", devam_ediyor=True)), 0)
+        self.assertEqual(uak.kalem_bul(uak.setler()[0], F("12.6", devam_ediyor=True))[1].kod, "7d")
+
+    def test_idari(self):
+        self.assertEqual(ay.idari_ek2("Dekan Yardımcısı", "2019-2024"), ("18.3", 5))
+        self.assertEqual(ay.idari_ek2("Bölüm Başkan Yardımcısı", "2019-", 2026), ("18.5", 7))
+        self.assertEqual(ay.idari_ek2("Bölüm Başkanı", "2020-2022"), ("18.4", 2))
+        self.assertEqual(ay.idari_ek2("Komisyon Üyeliği", "2019-", 2026), ("18.10", 7))
+
+
 class UakKalemi(unittest.TestCase):
     def test_uak_kalem_zorlamasi(self):
         kset = uak.setler()[0]

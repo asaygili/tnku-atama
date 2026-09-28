@@ -642,6 +642,7 @@ class Faaliyet:
     yuksek_lisans: bool = False   # 17.3 yüksek lisans tez jürisi → yarı puan
     uluslararasi: bool = False    # 11.10 uluslararası danışmanlık → 2 katı
     ekip_sayisi: int = 1          # 14.9–14.12 ekibin aldığı ödül → paylaştırılır
+    devam_ediyor: bool = False    # 12.x proje tamamlanmadı → EK-2'de puan almaz (ÜAK 7 sayar)
     # AVES'teki bölüm ve sıra (UM01, UB03 …) – kanıt klasörü adlarıyla aynı
     aves_kod: str = ""
     # Kanıt klasörüyle eşleştirme için değişmeyen kimlik:
@@ -688,6 +689,10 @@ def puan_dokumu(f: Faaliyet) -> dict:
             carpanlar.append(("Araştırma raporu", 0.5))
         elif f.patent_durum == "basvuru":
             carpanlar.append(("Başvuru", 0.25))
+
+    # EK-2 12: projeler tamamlanmış olmalıdır
+    if bilgi["grup"] == 12 and f.devam_ediyor:
+        carpanlar.append(("Devam ediyor (EK-2 12: tamamlanmış olmalı)", 0.0))
 
     # 11.2 yalnızca "kayıtlı patent"tir; başvuru/araştırma raporu için hüküm yoktur
     if f.kod == "11.2" and f.patent_durum in ("basvuru", "arastirma_raporu"):
