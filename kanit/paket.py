@@ -164,7 +164,8 @@ def kalemleri_hazirla(aday, arsiv: KanitArsivi, ayar: PaketAyarlari) -> list[Pak
                                            if p.is_file() and p != a.yol and p.suffix.lower() == ".pdf"
                                            and p.name not in ATLANAN_ADLAR
                                            and p not in atif_yollari        # başka bir atıf
-                                           and not es.ilk_sayfa_eslesme(p)][:4]
+                                           and (p.name == "endeks_bilgisi.pdf"
+                                                or not es.ilk_sayfa_eslesme(p))][:4]
         else:
             k = arsiv.bul(f)
             kalem.kayit = k

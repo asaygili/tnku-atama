@@ -32,6 +32,13 @@ def main(argv=None):
     for ad in ("durum", "kimlik-yaz", "ozet"):
         a = alt.add_parser(ad)
         a.add_argument("kok", nargs="?")
+    a = alt.add_parser("wos-atif", help="WoS 'atıf yapan yayınlar' dışa aktarımından atıf klasörleri")
+    a.add_argument("dosya", nargs="+", help="WoS Tab delimited (.txt) ya da .xlsx dışa aktarımı")
+    a.add_argument("--kok")
+    a.add_argument("--soyad", required=True, help="öz atıfları ayıklamak için adayın soyadı")
+    a.add_argument("--esci", action="store_true", help="ESCI (5.2) atıflarını da ekle")
+    a.add_argument("--indirme", action="store_true", help="açık erişimli tam metinleri indirme")
+    a.add_argument("--uygula", action="store_true", help="klasörleri oluştur (yoksa yalnızca plan)")
     a = alt.add_parser("arsivden-ekle")
     a.add_argument("kok", nargs="?")
     a.add_argument("--kaynak", action="append", default=[], metavar="AD=YOL")
@@ -39,7 +46,7 @@ def main(argv=None):
     a.add_argument("--kopyala", action="store_true")
     ns = p.parse_args(argv)
 
-    kok = ns.kok or ayar.kanit_koku()
+    kok = getattr(ns, "kok", None) or ayar.kanit_koku()
     if not kok or not Path(kok).is_dir():
         p.error(f"kanıt klasörü bulunamadı: {kok!r}")
     arsiv = KanitArsivi(kok)
@@ -61,6 +68,22 @@ def main(argv=None):
     elif ns.komut == "ozet":
         from .ozet import ozet_yaz
         print("Özet yazıldı:", len(ozet_yaz(arsiv)), "yayın")
+    elif ns.komut == "wos-atif":
+        from . import wos
+        kayitlar = [k for d in ns.dosya for k in wos.oku(Path(d))]
+        kodlar = ("5.1", "5.2") if ns.esci else ("5.1",)
+        plan = wos.plan_olustur(arsiv, kayitlar, ns.soyad, kodlar)
+        print(f"WoS kaydı: {len(kayitlar)} | plan: {dict(Counter(p.durum for p in plan))}")
+        yeni = Counter(p.hedef.aves_kod for p in plan if p.durum == "yeni")
+        print("Yeni atıf (yayın başına):", dict(sorted(yeni.items())))
+        if ns.uygula:
+            sayac = wos.uygula(plan, arsiv, indir=not ns.indirme,
+                               ilerleme=lambda i, n, p: print(f"  {i}/{n} {p.klasor.name[:70]}"))
+            print("Uygulandı:", dict(sayac))
+            if (arsiv.kok / wos.INDIRILECEK_LISTESI).exists():
+                print("İndirilecek tam metinler:", arsiv.kok / wos.INDIRILECEK_LISTESI)
+        else:
+            print("Klasörleri oluşturmak için --uygula ekleyin.")
     elif ns.komut == "arsivden-ekle":
         from .arsivden import kurallari_oku, plan_olustur, uygula
         kaynaklar = dict(k.split("=", 1) for k in ns.kaynak)

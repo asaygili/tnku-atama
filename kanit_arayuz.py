@@ -319,6 +319,64 @@ def _atif_bolumu(a: KanitArsivi):
         st.success(m)
 
 
+def _wos_bolumu(a: KanitArsivi):
+    import pandas as pd
+    from collections import Counter
+    from kanit import wos
+    st.markdown("**2b. Web of Science atıf dışa aktarımından atıf klasörleri**")
+    st.caption("WoS: yayınlarınız → Create Citation Report → Citing articles (Without self-citations) "
+               "→ Web of Science Index süzgeci (SCI-EXPANDED, SSCI, A&HCI) → Export → "
+               "'Tab delimited file', Record content: 'Full Record and Cited References'.")
+    yuklenen = st.file_uploader("WoS dışa aktarım dosyası (.txt / .xlsx)", type=["txt", "xlsx"],
+                                accept_multiple_files=True, key="kt_wos_dosya")
+    if not yuklenen:
+        return
+    hedef_klasor = a.kok / "_WoS"
+    hedef_klasor.mkdir(exist_ok=True)
+    kayitlar = []
+    for dosya in yuklenen:
+        yol = hedef_klasor / dosya.name
+        yol.write_bytes(dosya.getvalue())
+        try:
+            kayitlar += wos.oku(yol)
+        except ValueError as e:
+            st.error(f"{dosya.name}: {e}")
+    if not kayitlar:
+        return
+    w1, w2 = st.columns(2)
+    with w1:
+        esci = st.checkbox("ESCI (5.2) atıflarını da ekle", value=False, key="kt_wos_esci")
+    with w2:
+        indir = st.checkbox("Açık erişimli tam metinleri indir", value=True, key="kt_wos_indir")
+    soyad = ((st.session_state.get("v_ad", "") or "").split() or [""])[-1]
+    plan = wos.plan_olustur(a, kayitlar, soyad, ("5.1", "5.2") if esci else ("5.1",))
+    tablo = {}
+    for p in plan:
+        if p.hedef is not None:
+            tablo.setdefault(p.hedef.aves_kod, Counter())[p.durum] += 1
+    st.dataframe(pd.DataFrame([{"Yayın": k, "Yeni": c["yeni"], "Zaten var": c["zaten var"],
+                                "Öz atıf": c["öz atıf"], "Kapsam dışı": c["kapsam dışı"]}
+                               for k, c in sorted(tablo.items())]),
+                 hide_index=True, use_container_width=True)
+    esles = sum(1 for p in plan if p.durum == "eşleşmedi")
+    yeni = sum(1 for p in plan if p.durum == "yeni")
+    st.caption(f"{len(kayitlar)} WoS kaydı · yeni atıf klasörü: {yeni}"
+               + (f" · hiçbir yayınınızla eşleşmeyen: {esles} (kaynakçada DOI / cilt-sayfa "
+                  "bulunamadı)" if esles else ""))
+    if st.button(f"{yeni} atıf klasörünü oluştur", key="kt_wos_uygula", disabled=not yeni,
+                 type="primary"):
+        cubuk = st.progress(0.0, text="Atıf klasörleri oluşturuluyor…")
+        sayac = wos.uygula(plan, a, indir=indir,
+                           ilerleme=lambda i, n, p: cubuk.progress(i / n, text=f"{i}/{n} {p.wos.baslik[:60]}"))
+        st.session_state.pop("_kt_atiflar", None)       # sayım yenilensin
+        st.success(f"{sayac['tam metin indirildi'] + sayac['tam metin indirilecek']} klasör oluşturuldu · "
+                   f"açık erişimli tam metin: {sayac['tam metin indirildi']} · "
+                   f"indirmeniz gereken: {sayac['tam metin indirilecek']}"
+                   + (f" (liste: {a.kok / wos.INDIRILECEK_LISTESI})"
+                      if sayac["tam metin indirilecek"] else "")
+                   + ". Şimdi 'Atıfları kanıt klasöründen say' ile sayımı yenileyin.")
+
+
 def _ders_bolumu(a: KanitArsivi):
     from kanit import oneri
     st.markdown("**3. Verilen dersler**")
@@ -384,6 +442,8 @@ def doldurma_bolumu(a: KanitArsivi | None) -> None:
         _tarih_bolumu()
         st.divider()
         _atif_bolumu(a)
+        st.divider()
+        _wos_bolumu(a)
         st.divider()
         _ders_bolumu(a)
         st.divider()

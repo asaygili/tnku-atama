@@ -25,7 +25,7 @@ from .ortak import doi_bul, md5, norm, pdf_metin
 KANIT_BELGESI = ("master journal", "journal search", "dizin", "indeks", "index", "kanit",
                  "cilt", "ekran", "citations of", "secili", "ilgili sayfa", "ilgilisayfa", "son5",
                  "about", "editor", "aims and scope", "archives", "scope", "atif yapilan",
-                 "atifyapilan", "retrieve", "out.pdf", "issn")
+                 "atifyapilan", "retrieve", "out.pdf", "issn", "endeks")
 ENDEKS_IFADELERI = [
     ("5.1", ("science citation index expanded", "science citation index", "sci expanded",
              "social sciences citation index", "arts humanities citation index", "sci e ")),
@@ -85,6 +85,24 @@ def _yil(metin: str) -> int | None:
     return max(yillar) if yillar else None
 
 
+def _wos_atifi(k: KanitKaydi, alt: Path) -> Atif | None:
+    """WoS dışa aktarımından açılmış atıf klasörü (kayit.json kaynak=wos)."""
+    import json
+    kj = alt / "kayit.json"
+    if not kj.exists():
+        return None
+    try:
+        v = json.loads(kj.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if v.get("kaynak") != "wos":
+        return None
+    pdfler = sorted(p for p in alt.glob("*.pdf") if p.name != "endeks_bilgisi.pdf")
+    yol = pdfler[0] if pdfler else alt / "endeks_bilgisi.pdf"
+    return Atif(k.aves_kod, yol, v.get("endeks_kodu"), False, (v.get("doi") or "").lower(),
+                v.get("yil"))
+
+
 def atiflari_topla(arsiv: KanitArsivi, soyad: str) -> list[Atif]:
     soyad_n = norm(soyad)
     sonuc: list[Atif] = []
@@ -93,6 +111,17 @@ def atiflari_topla(arsiv: KanitArsivi, soyad: str) -> list[Atif]:
             continue
         gorulen_hash, gorulen_doi, gorulen_metin = set(), set(), set()
         for alt in k.atif_klasorleri():
+            if (w := _wos_atifi(k, alt)) is not None:
+                # WoS dışa aktarımından açılan klasör: endeks ve yıl WoS kaydından;
+                # tam metin henüz konmamış olsa da atıf WoS kaydıyla belgelidir
+                if w.doi and w.doi in gorulen_doi:
+                    continue
+                if w.doi:
+                    gorulen_doi.add(w.doi)
+                if w.yol != alt / "endeks_bilgisi.pdf":
+                    gorulen_hash.add(md5(w.yol))
+                sonuc.append(w)
+                continue
             dosyalar = [p for p in alt.iterdir() if p.is_file()]
             kanitlar = [p for p in dosyalar if _kanit_belgesi_mi(p)]
             yayinlar = [p for p in dosyalar if p.suffix.lower() == ".pdf" and p not in kanitlar]

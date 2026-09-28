@@ -56,6 +56,13 @@ python -m kanit ozet                        # kunye.txt kontrol listeleri + Exce
 python -m kanit kimlik-yaz                  # eski klasörlere kayit.json yazar
 python -m kanit arsivden-ekle --kaynak Tesvik2024="G:\Akademik Teşvik\Akademik Teşvik 2024" [--kopyala]
 ```
+**Web of Science atıfları:** WoS'ta yayınlarınız → *Create Citation Report* → *Citing articles* (*Without self-citations*) → sol panelde *Web of Science Index*: SCI-EXPANDED, SSCI, A&HCI → *Export* → *Tab delimited file*, *Record content: Full Record and Cited References*. Dosyayı programda *Kanıt klasöründen doldur → 2b* ile yükleyin ya da:
+```bash
+python -m kanit wos-atif savedrecs.txt --soyad Saygılı            # plan
+python -m kanit wos-atif savedrecs.txt --soyad Saygılı --uygula   # klasörleri oluştur
+```
+Her atıf yapan yayın, kaynakçasından bulunan yayınınızın `atiflar\WoS_<yıl>_<yazar>_<başlık> (SCI-E)\` klasörüne; WoS kaydından üretilen `endeks_bilgisi.pdf` ve (açık erişimliyse) tam metniyle konur. Öz atıflar ve arşivde zaten bulunan atıflar atlanır; ücretli tam metinler `_indirilecek_atiflar.xlsx` listesinde toplanır.
+
 `arsivden-ekle`, eski teşvik / doçentlik / atama klasörlerindeki belgeleri faaliyet klasörlerine eşler; `--kopyala` verilmezse yalnızca plan çıkarır. Aynı içerik ikinci kez eklenmez; kaynak klasörlere dokunulmaz.
 
 ---
