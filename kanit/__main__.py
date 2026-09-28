@@ -36,7 +36,7 @@ def main(argv=None):
     a.add_argument("dosya", nargs="+", help="WoS Tab delimited (.txt) ya da .xlsx dışa aktarımı")
     a.add_argument("--kok")
     a.add_argument("--soyad", required=True, help="öz atıfları ayıklamak için adayın soyadı")
-    a.add_argument("--esci", action="store_true", help="ESCI (5.2) atıflarını da ekle")
+    a.add_argument("--esci", action="store_true", help="ESCI (5.2) ve BKCI (5.7) atıflarını da ekle")
     a.add_argument("--indirme", action="store_true", help="açık erişimli tam metinleri indirme")
     a.add_argument("--uygula", action="store_true", help="klasörleri oluştur (yoksa yalnızca plan)")
     a = alt.add_parser("arsivden-ekle")
@@ -71,7 +71,7 @@ def main(argv=None):
     elif ns.komut == "wos-atif":
         from . import wos
         kayitlar = [k for d in ns.dosya for k in wos.oku(Path(d))]
-        kodlar = ("5.1", "5.2") if ns.esci else ("5.1",)
+        kodlar = ("5.1", "5.2", "5.7") if ns.esci else ("5.1",)
         plan = wos.plan_olustur(arsiv, kayitlar, ns.soyad, kodlar)
         print(f"WoS kaydı: {len(kayitlar)} | plan: {dict(Counter(p.durum for p in plan))}")
         yeni = Counter(p.hedef.aves_kod for p in plan if p.durum == "yeni")

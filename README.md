@@ -56,12 +56,13 @@ python -m kanit ozet                        # kunye.txt kontrol listeleri + Exce
 python -m kanit kimlik-yaz                  # eski klasörlere kayit.json yazar
 python -m kanit arsivden-ekle --kaynak Tesvik2024="G:\Akademik Teşvik\Akademik Teşvik 2024" [--kopyala]
 ```
-**Web of Science atıfları:** WoS'ta yayınlarınız → *Create Citation Report* → *Citing articles* (*Without self-citations*) → sol panelde *Web of Science Index*: SCI-EXPANDED, SSCI, A&HCI → *Export* → *Tab delimited file*, *Record content: Full Record and Cited References*. Dosyayı programda *Kanıt klasöründen doldur → 2b* ile yükleyin ya da:
+**Web of Science atıfları:** WoS'ta yayınlarınız → *Create Citation Report* → *Citing articles* (*Without self-citations*) → sol panelde *Web of Science Index*: SCI-EXPANDED, SSCI, A&HCI (EK-2 5.1), ESCI (5.2), Book Citation Index (5.7, uluslararası kitapta atıf) → *Export* → *Tab delimited file*, *Record content: Full Record and Cited References*. Dosyayı programda *Kanıt klasöründen doldur → 2b* ile yükleyin ya da:
 ```bash
 python -m kanit wos-atif savedrecs.txt --soyad Saygılı            # plan
 python -m kanit wos-atif savedrecs.txt --soyad Saygılı --uygula   # klasörleri oluştur
+python -m kanit wos-atif savedrecs.txt --soyad Saygılı --esci --uygula   # + ESCI ve BKCI
 ```
-Her atıf yapan yayın, kaynakçasından bulunan yayınınızın `atiflar\WoS_<yıl>_<yazar>_<başlık> (SCI-E)\` klasörüne; WoS kaydından üretilen `endeks_bilgisi.pdf` ve (açık erişimliyse) tam metniyle konur. Öz atıflar ve arşivde zaten bulunan atıflar atlanır; ücretli tam metinler `_indirilecek_atiflar.xlsx` listesinde toplanır.
+Her atıf yapan yayın, kaynakçasından bulunan yayınınızın `atiflar\WoS_<yıl>_<yazar>_<başlık> (SCI-E)\` klasörüne; WoS kaydından üretilen `endeks_bilgisi.pdf` ve (açık erişimliyse) tam metniyle konur. Kaynakçadaki DOI, yıl + cilt + sayfa ya da (bildirilerde) yazar + yıl + kısaltılmış kaynak adıyla eşleştirme yapılır. Öz atıflar ve arşivde zaten bulunan atıflar atlanır; ücretli tam metinler `_indirilecek_atiflar.xlsx` listesinde toplanır.
 
 `arsivden-ekle`, eski teşvik / doçentlik / atama klasörlerindeki belgeleri faaliyet klasörlerine eşler; `--kopyala` verilmezse yalnızca plan çıkarır. Aynı içerik ikinci kez eklenmez; kaynak klasörlere dokunulmaz.
 

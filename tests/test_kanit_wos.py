@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from kanit import KanitArsivi, atif, wos  # noqa: E402
 from kanit import klasor as kk  # noqa: E402
 from kanit.kayit import kayit_yaz  # noqa: E402
-from test_kanit import KUNYE_A, pdf_yaz  # noqa: E402
+from test_kanit import KUNYE_A, KUNYE_B, pdf_yaz  # noqa: E402
 
 ETIKETLER = ["PT", "AU", "AF", "TI", "SO", "SN", "EI", "PY", "DI", "WE", "CR", "UT", "DT"]
 SCIE = "Science Citation Index Expanded (SCI-EXPANDED)"
@@ -101,6 +101,28 @@ class Wos(unittest.TestCase):
         self.assertIsNone(wos.indirilecek_listesi(KanitArsivi(self.kok)))
         self.assertFalse((k1 / "INDIRILECEK.txt").exists())
 
+    def test_bkci_ve_kisaltmali_kaynak(self):
+        d = self.kok / kk.klasor_adi("NB01", KUNYE_B)
+        d.mkdir()
+        kk.kunye_yaz(d, "NB01", KUNYE_B, "")
+        kayit_yaz(d, "NB01", KUNYE_B, "", tur="bildiri")
+        satirlar = [kayit("WOS:7", "Park, H", "Book chapter citing the conference paper",
+                          "Yilmaz A, 2023, CONF Y; Other X, 2020, Y, V1, P2",
+                          we="Book Citation Index – Science (BKCI-S)", di="10.9/f")]
+        f = self.kok / "bkci.txt"
+        f.write_text("\t".join(ETIKETLER) + "\n" + "\n".join(
+            "\t".join(s[e] for e in ETIKETLER) for s in satirlar), encoding="utf-8-sig")
+        k = wos.oku(f)[0]
+        self.assertEqual((k.endeks_kodu, k.endeks_kisa), ("5.7", "BKCI"))
+        a = KanitArsivi(self.kok)
+        self.assertEqual([x.aves_kod for x in wos.atif_yapilan_yayinlar(k, a, "Yılmaz")], ["NB01"])
+        self.assertEqual(wos.plan_olustur(a, [k], "Yılmaz")[0].durum, "kapsam dışı")
+        plan = wos.plan_olustur(a, [k], "Yılmaz", ("5.1", "5.2", "5.7"))
+        self.assertEqual(plan[0].durum, "yeni")
+        wos.uygula(plan, a, indir=False)
+        at = [x for x in atif.atiflari_topla(KanitArsivi(self.kok), "Yılmaz")
+              if x.yol.parent.name.startswith("WoS_")]
+        self.assertEqual([x.endeks for x in at], ["5.7"])
 
 if __name__ == "__main__":
     unittest.main()

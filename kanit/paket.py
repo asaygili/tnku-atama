@@ -146,7 +146,7 @@ def kalemleri_hazirla(aday, arsiv: KanitArsivi, ayar: PaketAyarlari) -> list[Pak
                     atif_yollari = {x.yol for x in atiflar}
                 _, kod, zaman = f.kimlik.split(":", 2)
                 basvuru = aday.docent_basvuru_tarihi
-                bilinen = ("5.1", "5.2", "5.5")
+                bilinen = ("5.1", "5.2", "5.5", "5.7")
                 for a in atiflar:
                     a_zaman = ("sonrası" if a.yil > basvuru.year else "öncesi") \
                         if (basvuru and a.yil) else "bilinmiyor"

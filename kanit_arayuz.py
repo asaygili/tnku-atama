@@ -232,7 +232,8 @@ def _ders_sayisi_cb(n):
     st.session_state["v_ders"] = n
 
 
-ENDEKS_ADI = {"5.1": "5.1 SCI/SSCI/AHCI", "5.2": "5.2 ESCI/Scopus", "5.5": "5.5 TR Dizin"}
+ENDEKS_ADI = {"5.1": "5.1 SCI/SSCI/AHCI", "5.2": "5.2 ESCI/Scopus", "5.5": "5.5 TR Dizin",
+              "5.7": "5.7 Uluslararası kitap (BKCI)"}
 BELIRSIZ_SECENEK = {"": "Sayılmasın", "5.4": "5.4 Diğer uluslararası hakemli (1 p)",
                     "5.3": "5.3 Diğer uluslararası endeksli (2 p)",
                     "5.6": "5.6 Diğer ulusal hakemli (1 p)"}
@@ -325,8 +326,13 @@ def _wos_bolumu(a: KanitArsivi):
     from kanit import wos
     st.markdown("**2b. Web of Science atıf dışa aktarımından atıf klasörleri**")
     st.caption("WoS: yayınlarınız → Create Citation Report → Citing articles (Without self-citations) "
-               "→ Web of Science Index süzgeci (SCI-EXPANDED, SSCI, A&HCI) → Export → "
+               "→ Web of Science Index süzgeci (SCI-EXPANDED, SSCI, A&HCI, ESCI, BKCI) → Export → "
                "'Tab delimited file', Record content: 'Full Record and Cited References'.")
+    if (a.kok / wos.INDIRILECEK_LISTESI).exists() and st.button(
+            "Tam metni eksik atıflar için açık erişimi yeniden dene", key="kt_wos_yeniden"):
+        cubuk = st.progress(0.0, text="Açık erişim aranıyor…")
+        sayac = wos.eksikleri_indir(a, ilerleme=lambda i, n, p: cubuk.progress(i / n, text=f"{i}/{n}"))
+        st.success(f"İndirilen: {sayac['indirildi']} · hâlâ eksik: {sayac['indirilemedi']}")
     yuklenen = st.file_uploader("WoS dışa aktarım dosyası (.txt / .xlsx)", type=["txt", "xlsx"],
                                 accept_multiple_files=True, key="kt_wos_dosya")
     if not yuklenen:
@@ -345,11 +351,12 @@ def _wos_bolumu(a: KanitArsivi):
         return
     w1, w2 = st.columns(2)
     with w1:
-        esci = st.checkbox("ESCI (5.2) atıflarını da ekle", value=False, key="kt_wos_esci")
+        esci = st.checkbox("ESCI (5.2) ve Book Citation Index (5.7) atıflarını da ekle",
+                           value=True, key="kt_wos_esci")
     with w2:
         indir = st.checkbox("Açık erişimli tam metinleri indir", value=True, key="kt_wos_indir")
     soyad = ((st.session_state.get("v_ad", "") or "").split() or [""])[-1]
-    plan = wos.plan_olustur(a, kayitlar, soyad, ("5.1", "5.2") if esci else ("5.1",))
+    plan = wos.plan_olustur(a, kayitlar, soyad, ("5.1", "5.2", "5.7") if esci else ("5.1",))
     tablo = {}
     for p in plan:
         if p.hedef is not None:

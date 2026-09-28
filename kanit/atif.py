@@ -31,6 +31,7 @@ ENDEKS_IFADELERI = [
              "social sciences citation index", "arts humanities citation index", "sci e ")),
     ("5.2", ("emerging sources citation index", "esci", "scopus")),
     ("5.5", ("tr dizin", "trdizin", "ulakbim")),
+    ("5.7", ("book citation index", "bkci")),
 ]
 
 

@@ -44,9 +44,11 @@ ALANLAR = {
 ENDEKS_KODU = [("5.1", ("science citation index expanded", "sci expanded", "science citation index",
                         "social sciences citation index", "ssci", "arts humanities citation index",
                         "a hci", "ahci")),
-               ("5.2", ("emerging sources citation index", "esci"))]
+               ("5.2", ("emerging sources citation index", "esci")),
+               ("5.7", ("book citation index",))]         # BKCI kitabında atıf
 ENDEKS_KISA = {"science citation index expanded": "SCI-E", "social sciences citation index": "SSCI",
-               "arts humanities citation index": "AHCI", "emerging sources citation index": "ESCI"}
+               "arts humanities citation index": "AHCI", "emerging sources citation index": "ESCI",
+               "book citation index": "BKCI"}
 
 
 @dataclass
@@ -131,10 +133,44 @@ def _ref_ipuclari(kunye: str) -> tuple[str, str, str]:
     return yil, cilt, sayfa
 
 
-def atif_yapilan_yayinlar(k: WosKaydi, arsiv: KanitArsivi) -> list[KanitKaydi]:
-    """Kaynakçasında geçen yayınlarımız (önce DOI; yoksa yıl + cilt + sayfa + soyad)."""
+def _kisaltma_eslesir(kisaltma: str, kunye: str) -> bool:
+    """WoS kaynak kısaltmasının her kelimesi künyedeki bir kelimenin başı mı?
+    ("SIG PROCESS COMMUN" ↔ "Signal Processing and Communications Applications")"""
+    kel = norm(kunye).split()
+    parcalar = [p for p in norm(kisaltma).split() if len(p) > 1]
+    return bool(parcalar) and all(any(w.startswith(p) for w in kel) for p in parcalar)
+
+
+def _kisaltmali_eslesme(ref: str, arsiv: KanitArsivi, soyad: str) -> KanitKaydi | None:
+    """DOI ve cilt/sayfa içermeyen kaynak ("Saygili A, 2018, SIG PROCESS COMMUN"):
+    ilk yazar soyadı + yıl + kısaltılmış kaynak adı tek bir yayınımızla eşleşirse o."""
+    parca = [p.strip() for p in ref.split(",")]
+    if len(parca) < 3 or not soyad or norm(parca[0]).split()[:1] != [norm(soyad)]:
+        return None
+    yil, kaynak = parca[1], parca[2]
+    if not re.fullmatch(r"(19|20)\d{2}", yil) or len(norm(kaynak)) < 4:
+        return None
+    adaylar = [kay for kay in arsiv.kayitlar if kay.aves_kod and yil in kay.kunye
+               and _kisaltma_eslesir(kaynak, kay.kunye.split(ay_baslik(kay.kunye))[-1])]
+    return adaylar[0] if len(adaylar) == 1 else None
+
+
+def ay_baslik(kunye: str) -> str:
+    import aves_yardimci as ay
+    return ay.baslik_cikar(kunye)
+
+
+def atif_yapilan_yayinlar(k: WosKaydi, arsiv: KanitArsivi, soyad: str = "") -> list[KanitKaydi]:
+    """Kaynakçasında geçen yayınlarımız: DOI; yoksa yıl + cilt + sayfa; o da yoksa
+    ilk yazar soyadı + yıl + kısaltılmış kaynak adı (tek yayınla eşleşiyorsa)."""
     bulunan = []
+    for ref in k.kaynakca:
+        if not doi_bul(ref) and not re.search(r"\bV\d+", ref) and \
+                (kay := _kisaltmali_eslesme(ref, arsiv, soyad)) and kay not in bulunan:
+            bulunan.append(kay)
     for kay in arsiv.kayitlar:
+        if kay in bulunan:
+            continue
         if not kay.aves_kod:
             continue
         doiler = {i[4:] for i in kay.kimlikler if i.startswith("doi:")}
@@ -193,7 +229,7 @@ def plan_olustur(arsiv: KanitArsivi, kayitlar: list[WosKaydi], soyad: str,
         if anahtar in gorulen:
             continue
         gorulen.add(anahtar)
-        hedefler = atif_yapilan_yayinlar(w, arsiv)
+        hedefler = atif_yapilan_yayinlar(w, arsiv, soyad)
         if not hedefler:
             plan.append(PlanSatiri(w, None, "eşleşmedi"))
             continue
@@ -273,6 +309,26 @@ def uygula(plan: list[PlanSatiri], arsiv: KanitArsivi, indir: bool = True,
         sayac["tam metin indirildi" if indi else "tam metin indirilecek"] += 1
     sayac.update(p.durum for p in plan)
     indirilecek_listesi(arsiv)
+    return sayac
+
+
+def eksikleri_indir(arsiv: KanitArsivi, ilerleme=None) -> Counter:
+    """INDIRILECEK.txt bulunan WoS atıf klasörleri için açık erişimli tam metni yeniden dener."""
+    from .indir import acik_erisim, oturum, pdf_indir
+    bekleyen = [alt for kay in arsiv.kayitlar for alt in kay.atif_klasorleri()
+                if (alt / "INDIRILECEK.txt").exists()]
+    s, sayac = oturum(), Counter()
+    for i, alt in enumerate(bekleyen, 1):
+        if ilerleme:
+            ilerleme(i, len(bekleyen), alt)
+        try:
+            doi = json.loads((alt / "kayit.json").read_text(encoding="utf-8")).get("doi")
+            indi = bool(doi) and any(pdf_indir(url, alt / "atif_yapan.pdf", s, deneme=2)[0]
+                                     for url in acik_erisim(doi, s)["pdf"])
+        except Exception:  # noqa: BLE001
+            indi = False
+        sayac["indirildi" if indi else "indirilemedi"] += 1
+    indirilecek_listesi(arsiv)                   # indirilenlerin INDIRILECEK.txt'si silinir
     return sayac
 
 
