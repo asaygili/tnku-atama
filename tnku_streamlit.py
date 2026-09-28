@@ -16,6 +16,7 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 import tnku_atama as t
+import uak_kriterleri as uak
 
 
 # ── AVES Otomatik Yükleme ────────────────────────────────────────────────────
@@ -970,9 +971,27 @@ def _aday_olustur() -> t.AdayBilgi:
         docent_sonrasi_sure_yil=float(st.session_state.get("v_docsure", 0.0)),
         docent_basvuru_tarihi=st.session_state.get("v_docent_basvuru"),
         docent_unvan_tarihi=st.session_state.get("v_docent_unvan"),
+        uak_kriter_seti=st.session_state.get("v_uak_set", "") or "",
         uak_kriterleri_yeniden_saglandi=bool(
             st.session_state.get("v_uak_docent_kriteri", False)),
     )
+
+
+UAK_BASLICA_SECENEK = {
+    None:  "Belirtilmemiş (puan eşit bölünür)",
+    True:  "Aday başlıca yazar",
+    False: "Başka bir yazar başlıca",
+}
+UAK_BASLICA_YARDIM = ("ÜAK tanımı: tek yazarlı makale ya da adayın danışmanlığını "
+                      "yaptığı lisansüstü öğrenci(ler)le yazdığı makale. İlk yazar "
+                      "olmak yeterli değildir.")
+
+
+def _uak_seti():
+    kimlik = st.session_state.get("v_uak_set", "")
+    if st.session_state.get("v_kadro") == "profesor" and kimlik:
+        return uak.getir(kimlik)
+    return None
 
 
 def _docent_basvuru_yili() -> int:
@@ -983,6 +1002,7 @@ def _docent_basvuru_yili() -> int:
 
 def _faaliyet_satirlari(kadro_su: str) -> list[dict]:
     rows = []
+    kset = _uak_seti()
     for i, f in enumerate(st.session_state.faaliyetler):
         bilgi_f = t.EK2_PUANLAR.get(f.kod, {})
         p_f, _  = t.faaliyet_puan_hesapla(f)
@@ -1011,6 +1031,10 @@ def _faaliyet_satirlari(kadro_su: str) -> list[dict]:
             "Doc.Sn.":  "✓" if f.docent_sonrasi else "",
             "Başlıca":  "★" if f.baslica_eser else "",
         })
+        if kset:
+            bk = uak.kalem_bul(kset, f)
+            rows[-1]["ÜAK"] = (bk[1].kod + (" (tez)" if f.tezden_uretilmis else "")
+                               if bk else "–")
     return rows
 
 
@@ -1207,6 +1231,47 @@ def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
     kt.setStyle(kts)
     elems.append(kt)
     elems.append(Spacer(1, 10))
+
+    uak_s = sonuc.get("uak")
+    if uak_s:
+        elems.append(Paragraph("UAK DOCENTLIK KRITERLERI - MD. 11(2)", s_sec))
+        elems.append(Paragraph(
+            _xml_escape(f"{uak_s['set'].ad}. Yalnızca doçentlik başvurusu sonrası "
+                        f"faaliyetler değerlendirilmiştir. Toplam: "
+                        f"{uak_s['toplam']:g} puan."), s_xs))
+        elems.append(Spacer(1, 4))
+        udata = [["Bölüm", "Faaliyet", "Ham Puan", "Puan", "Asgari", "Azami"]]
+        for b in uak_s["bolumler"]:
+            udata.append([Paragraph(_xml_escape(f"{b['no']}. {b['ad']}"), s_kc),
+                          str(b["adet"]), f"{b['ham']:g}", f"{b['puan']:g}",
+                          f"{b['min']:g}" if b["min"] else "–",
+                          f"{b['max']:g}" if b["max"] is not None else "–"])
+        udata.append([Paragraph("<b>TOPLAM</b>", s_kc), "", "",
+                      f"{uak_s['toplam']:g}", f"{uak_s['set'].toplam_min:g}", ""])
+        uts = tbl_style()
+        uts.add("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#D6E4F7"))
+        uts.add("FONTNAME", (3, -1), (3, -1), fb)
+        ut = Table(udata, repeatRows=1,
+                   colWidths=[7.4*cm, 1.8*cm, 2*cm, 2*cm, 2*cm, 2.2*cm])
+        ut.setStyle(uts)
+        elems.append(ut)
+        elems.append(Spacer(1, 6))
+        sdata = [["ÜAK", "Kalem", "EK-2", "Birim", "Yazar Payı", "Adet", "Puan"]]
+        for s in uak_s["satirlar"]:
+            sdata.append([s["kalem"], Paragraph(_xml_escape(s["kalem_ad"]), s_kc),
+                          s["faaliyet"].kod, f"{s['kalem_puan']:g}",
+                          f"%{s['pay'] * 100:.4g}", str(s["adet"]), f"{s['puan']:g}"])
+        if len(sdata) > 1:
+            st_ = Table(sdata, repeatRows=1,
+                        colWidths=[1.2*cm, 8.2*cm, 1.4*cm, 1.4*cm, 2*cm, 1.4*cm, 1.8*cm])
+            st_.setStyle(tbl_style())
+            elems.append(st_)
+        elle = [n for b in uak_s["bolumler"] for n in b["elle_kontrol"]]
+        if elle:
+            elems.append(Spacer(1, 4))
+            elems.append(Paragraph(_xml_escape("Elle kontrol: " + " · ".join(elle)),
+                                   s_xs))
+        elems.append(Spacer(1, 10))
 
     elems.append(Paragraph("FAALIYET DETAYI", s_sec))
 
@@ -1475,13 +1540,25 @@ with tab1:
                 f"[🔗 ÜAK Doçentlik Başvuru Şartları Arşivi]"
                 f"(https://www.uak.gov.tr/page/docentlik-basvuru-sartlari-kLPHX)",
             )
-            st.checkbox(
-                f"✅ {_doc_donem} ÜAK doçentlik kriterlerini "
-                f"doçentlik başvurusu sonrası çalışmalarımla yeniden "
-                f"sağladığımı beyan ederim (tezden üretilen yayın hariç).",
-                key="v_uak_docent_kriteri",
-                help="Madde 11(2) gereği profesörlük başvurusu için zorunludur."
+            _uak_secenek = [""] + [s.kimlik for s in uak.setler()]
+            st.selectbox(
+                "Doçentlik başvurusundaki ÜAK kriteri",
+                options=_uak_secenek, key="v_uak_set",
+                format_func=lambda k: uak.getir(k).ad if k
+                            else "Listede yok – beyanla devam et",
+                help="Seçilirse doçentlik başvurusu sonrası faaliyetleriniz bu "
+                     "kriterlere göre otomatik puanlanır. Faaliyetlerde "
+                     "'Lisansüstü tezden üretildi' ve 'ÜAK başlıca yazar' "
+                     "alanlarını doldurun."
             )
+            if not st.session_state.get("v_uak_set"):
+                st.checkbox(
+                    f"✅ {_doc_donem} ÜAK doçentlik kriterlerini "
+                    f"doçentlik başvurusu sonrası çalışmalarımla yeniden "
+                    f"sağladığımı beyan ederim (tezden üretilen yayın hariç).",
+                    key="v_uak_docent_kriteri",
+                    help="Madde 11(2) gereği profesörlük başvurusu için zorunludur."
+                )
 
     st.divider()
 
@@ -1714,6 +1791,28 @@ with tab2:
                                  "1.1; ALAN-2 için 1.1/1.3/1.4/2.1/2.2/2.4; "
                                  "tek veya ilk yazar. Yayın tarihi zorunludur.")
 
+            # ÜAK doçentlik kriterleri (Md. 11(2)) için ek bilgiler
+            tezden, uak_bsl = False, None
+            if _uak_seti():
+                ut1, ut2 = st.columns(2)
+                with ut1:
+                    if grup_no in {1, 2, 3}:
+                        tezden = st.checkbox(
+                            "Lisansüstü tezden üretildi (ÜAK)", key="v_tez",
+                            help="ÜAK tablosunda tezden üretilmiş yayınlar ayrı "
+                                 "bölümde puanlanır.")
+                    if grup_no == 11:
+                        toplam_yazar = st.number_input(
+                            "Buluşçu sayısı (ÜAK)", min_value=1, max_value=50,
+                            value=1, key="v_bulusu",
+                            help="ÜAK: patent puanı kişi sayısına bölünür.")
+                with ut2:
+                    if grup_no == 1 and toplam_yazar > 1:
+                        uak_bsl = st.selectbox(
+                            "ÜAK başlıca yazar", options=list(UAK_BASLICA_SECENEK),
+                            format_func=UAK_BASLICA_SECENEK.get, key="v_uak_bsl",
+                            help=UAK_BASLICA_YARDIM)
+
             kunye_giris = st.text_area(
                 "📄 Künye (isteğe bağlı)",
                 key="v_kunye",
@@ -1728,7 +1827,8 @@ with tab2:
                 sorumlu_veya_senyör=sorumlu, q_degeri=q_val,
                 patent_durum=patent_durum,
                 ikinci_danisман=ikinci_dan, docent_sonrasi=docsn,
-                yayin_tarihi=yayin_t, baslica_eser=baslica,
+                yayin_tarihi=yayin_t, baslica_eser=baslica, tezden_uretilmis=tezden,
+                uak_baslica_yazar=uak_bsl,
             )
             p_tmp, _ = t.faaliyet_puan_hesapla(f_tmp)
             p1_mi    = t.is_puan1(secili_kod,
@@ -1756,7 +1856,8 @@ with tab2:
                         sorumlu_veya_senyör=sorumlu, q_degeri=q_val,
                         patent_durum=patent_durum,
                         ikinci_danisман=ikinci_dan, docent_sonrasi=docsn,
-                        yayin_tarihi=yayin_t, baslica_eser=baslica,
+                        yayin_tarihi=yayin_t, baslica_eser=baslica, tezden_uretilmis=tezden,
+                        uak_baslica_yazar=uak_bsl,
                     )
                     _f_yeni._kunye = (kunye_giris or "").strip()
                     st.session_state.faaliyetler.append(_f_yeni)
@@ -1907,6 +2008,28 @@ with tab2:
                             "★ Başlıca Araştırma Eseri", value=f_d.baslica_eser,
                             key=f"bsl_{didx}")
 
+                yeni_tez    = getattr(f_d, "tezden_uretilmis", False)
+                yeni_uakbsl = getattr(f_d, "uak_baslica_yazar", None)
+                _grup_yeni  = t.EK2_PUANLAR.get(yeni_kod, {}).get("grup", 0)
+                if _uak_seti():
+                    du1, du2 = st.columns(2)
+                    with du1:
+                        if _grup_yeni in {1, 2, 3}:
+                            yeni_tez = st.checkbox(
+                                "Lisansüstü tezden üretildi (ÜAK)",
+                                value=yeni_tez, key=f"tez_{didx}")
+                        if _grup_yeni == 11:
+                            st.caption("ÜAK: buluşçu sayısını 'Toplam Yazar' "
+                                       "alanına girin.")
+                    with du2:
+                        if _grup_yeni == 1 and yeni_tyz > 1:
+                            yeni_uakbsl = st.selectbox(
+                                "ÜAK başlıca yazar",
+                                options=list(UAK_BASLICA_SECENEK),
+                                index=list(UAK_BASLICA_SECENEK).index(yeni_uakbsl),
+                                format_func=UAK_BASLICA_SECENEK.get,
+                                key=f"uakbsl_{didx}", help=UAK_BASLICA_YARDIM)
+
                 yeni_pd = f_d.patent_durum
                 if yeni_kod in ("11.1", "11.7"):
                     yeni_pd = st.radio(
@@ -1931,6 +2054,8 @@ with tab2:
                         f_d.docent_sonrasi    = yeni_docsn
                         f_d.yayin_tarihi      = yeni_yt
                         f_d.baslica_eser      = yeni_bsl
+                        f_d.tezden_uretilmis  = yeni_tez
+                        f_d.uak_baslica_yazar = yeni_uakbsl
                         st.rerun()
                 with btn2:
                     if st.button("🗑 Sil", key=f"sil_{didx}",
@@ -2119,6 +2244,41 @@ if sonuc is not None and son_aday is not None:
         )
 
     st.divider()
+
+    # ── ÜAK doçentlik kriterleri (Md. 11(2)) ────────────────────────────────
+    uak_s = sonuc.get("uak")
+    if uak_s:
+        st.markdown(f'<div class="card-title">ÜAK DOÇENTLİK KRİTERLERİ – '
+                    f'MD. 11(2)</div>', unsafe_allow_html=True)
+        st.caption(f"{uak_s['set'].ad} · yalnızca doçentlik başvurusu sonrası "
+                   f"faaliyetler · toplam {uak_s['toplam']:g} puan")
+        st.dataframe(pd.DataFrame([{
+            "Bölüm":    f"{b['no']}. {b['ad']}",
+            "Faaliyet": b["adet"],
+            "Ham Puan": b["ham"],
+            "Puan":     b["puan"],
+            "Asgari":   b["min"] or None,
+            "Azami":    b["max"],
+        } for b in uak_s["bolumler"]]), use_container_width=True, hide_index=True)
+        with st.expander(f"Faaliyet bazında ÜAK puanları "
+                         f"({len(uak_s['satirlar'])} eşleşen · "
+                         f"{len(uak_s['eslesmeyen'])} eşleşmeyen)"):
+            st.dataframe(pd.DataFrame([{
+                "ÜAK":      s["kalem"],
+                "Kalem":    s["kalem_ad"],
+                "EK-2":     s["faaliyet"].kod,
+                "Birim":    s["kalem_puan"],
+                "Yazar Payı": round(s["pay"], 3),
+                "Adet":     s["adet"],
+                "Puan":     s["puan"],
+            } for s in uak_s["satirlar"]]), use_container_width=True, hide_index=True)
+            if uak_s["eslesmeyen"]:
+                st.caption("ÜAK tablosunda karşılığı olmayan faaliyetler: " +
+                           ", ".join(sorted({f.kod for f in uak_s["eslesmeyen"]})))
+        elle = [n for b in uak_s["bolumler"] for n in b["elle_kontrol"]]
+        if elle:
+            st.warning("Elle kontrol edilmesi gerekenler: " + " · ".join(elle))
+        st.divider()
 
     # ── Faaliyet detayı ──────────────────────────────────────────────────────
     st.markdown('<div class="card-title">FAALİYET DETAYI</div>',

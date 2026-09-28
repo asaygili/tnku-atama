@@ -15,6 +15,8 @@ from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Optional
 
+import uak_kriterleri as uak
+
 # Windows terminalinde UTF-8 çıktı için
 if sys.platform == "win32":
     try:
@@ -628,6 +630,11 @@ class Faaliyet:
     yayin_tarihi: Optional[date] = None
     # Profesörlükte "Başlıca Araştırma Eseri" olarak sunulan eser mi? (Md. 11(5))
     baslica_eser: bool = False
+    # ÜAK doçentlik kriterleri (Md. 11(2)) için:
+    tezden_uretilmis: bool = False   # adayın lisansüstü tezlerinden üretildi mi?
+    # ÜAK tanımıyla başlıca yazar (tek yazar ya da danışmanı olduğu öğrenciyle):
+    # True → aday başlıca yazar, False → başka bir yazar başlıca, None → belirtilmemiş
+    uak_baslica_yazar: Optional[bool] = None
 
 
 def q_carpan_al(q: Optional[str]) -> float:
@@ -736,8 +743,10 @@ class AdayBilgi:
     docent_basvuru_tarihi: Optional[date] = None  # (g) ve Md. 11(2) referansı
     docent_unvan_tarihi: Optional[date] = None    # Md. 11(5)-(7) ve 5 yıl
     degerlendirme_tarihi: Optional[date] = None   # None → bugün
-    # Md. 11(2): doçentlik başvuru dönemindeki ÜAK kriterlerini doçentlik
-    # başvurusu sonrası çalışmalarla yeniden sağladığına dair beyan
+    # Md. 11(2): doçentlik başvuru dönemindeki ÜAK kriter seti
+    # (uak_kriterleri kayıt defterindeki kimlik, örn. "2022-mart/muhendislik").
+    # Boşsa, kriterlerin yeniden sağlandığına dair beyan esas alınır.
+    uak_kriter_seti: str = ""
     uak_kriterleri_yeniden_saglandi: bool = False
 
 
@@ -885,6 +894,7 @@ def kriter_kontrol(aday: AdayBilgi) -> dict:
     """
     sonuclar = []
     puanlar = puan_hesapla(aday)
+    uak_sonuc = None   # profesörlükte ÜAK kriter seti seçildiyse doldurulur
 
     p1 = puanlar["puan1"]
     p2 = puanlar["puan2"]
@@ -1065,10 +1075,22 @@ def kriter_kontrol(aday: AdayBilgi) -> dict:
             ekle(f"Doçentlik unvanından itibaren {PROF_ASGARI_SURE_YIL} yıl dolmuş",
                  False, "Doçentlik unvan tarihi girilmemiş")
 
-        ekle("Md. 11(2) Doçentlik başvuru dönemi ÜAK kriterleri, doçentlik "
-             "başvurusu sonrası çalışmalarla yeniden sağlanmış (beyan)",
-             aday.uak_kriterleri_yeniden_saglandi,
-             "" if aday.uak_kriterleri_yeniden_saglandi else "Beyan işaretlenmemiş")
+        if aday.uak_kriter_seti:
+            kset = uak.getir(aday.uak_kriter_seti)
+            uak_sonuc = uak.degerlendir(
+                kset,
+                [f for f in aday.faaliyetler if docent_basvuru_sonrasi_mi(f, aday)],
+                egitim_yari_yil=aday.doktora_sonrasi_ders_yari_yil,
+                profesorluk=True,
+            )
+            for k in uak_sonuc["kontroller"]:
+                ekle(f"Md. 11(2) ÜAK {kset.donem} {kset.temel_alan}: {k['kriter']}",
+                     k["saglandi"], k["notlar"])
+        else:
+            ekle("Md. 11(2) Doçentlik başvuru dönemi ÜAK kriterleri, doçentlik "
+                 "başvurusu sonrası çalışmalarla yeniden sağlanmış (beyan)",
+                 aday.uak_kriterleri_yeniden_saglandi,
+                 "" if aday.uak_kriterleri_yeniden_saglandi else "Beyan işaretlenmemiş")
 
         ekle("Doçent sonrası ≥4 farklı yarıyıl ders",
              aday.doktora_sonrasi_ders_yari_yil >= 4,
@@ -1129,7 +1151,8 @@ def kriter_kontrol(aday: AdayBilgi) -> dict:
     return {
         "puanlar": puanlar,
         "kriterler": sonuclar,
-        "genel_sonuc": genel_basari
+        "genel_sonuc": genel_basari,
+        "uak": uak_sonuc,
     }
 
 
@@ -1294,12 +1317,25 @@ def faaliyet_ekle_interaktif(kadro_turu: str = "") -> list[Faaliyet]:
 
         yayin_t = None
         baslica = False
+        tezden = False
+        uak_bsl = None
         if kadro_turu == "profesor":
             yayin_t = tarih_al("  Yayın/faaliyet tarihi (gg.aa.yyyy, boş = bilinmiyor)")
             if yayin_t is None:
                 docent_s = evet_hayir("  Bu faaliyet doçentlik başvurusu sonrası mı?")
             if bilgi["grup"] in {1, 2}:
                 baslica = evet_hayir("  Başlıca Araştırma Eseri olarak sunulacak mı?")
+            if bilgi["grup"] in {1, 2, 3}:
+                tezden = evet_hayir("  Lisansüstü tezden üretildi mi? (ÜAK)")
+            if bilgi["grup"] == 1 and toplam_yazar > 1:
+                uak_bsl = {"1": None, "2": True, "3": False}[sec(
+                    "  ÜAK başlıca yazar (tek yazar / danışmanı olduğu öğrenciyle)",
+                    {"1": "Belirtilmemiş", "2": "Aday başlıca yazar",
+                     "3": "Başka bir yazar başlıca"})]
+            if bilgi["grup"] == 11:
+                toplam_yazar = int(sayi_al("  Buluşçu sayısı (ÜAK: puan kişi "
+                                           "sayısına bölünür)", tam=True,
+                                           min_val=1, max_val=50))
 
         f = Faaliyet(
             kod=kod, adet=adet,
@@ -1310,6 +1346,8 @@ def faaliyet_ekle_interaktif(kadro_turu: str = "") -> list[Faaliyet]:
             docent_sonrasi=docent_s,
             yayin_tarihi=yayin_t,
             baslica_eser=baslica,
+            tezden_uretilmis=tezden,
+            uak_baslica_yazar=uak_bsl,
         )
         faaliyetler.append(f)
         p_son, _ = faaliyet_puan_hesapla(f)
@@ -1445,9 +1483,16 @@ def ana_menu():
         aday.docent_sonrasi_sure_yil = sayi_al(
             "Doçent unvanı sonrası yükseköğretim kurumunda kaç yıl? (≥2.5 gerekli)",
             min_val=0, max_val=50)
-        aday.uak_kriterleri_yeniden_saglandi = evet_hayir(
-            "Doçentlik başvuru dönemindeki ÜAK kriterlerini doçentlik başvurusu "
-            "sonrası çalışmalarınızla yeniden sağladınız mı? (Md. 11(2))")
+        setler = {str(i): s for i, s in enumerate(uak.setler(), 1)}
+        secenek = {"0": "Listede yok – beyanla devam et"}
+        secenek.update({k: s.ad for k, s in setler.items()})
+        s = sec("Doçentlik başvuru dönemindeki ÜAK kriteri (Md. 11(2))", secenek)
+        if s in setler:
+            aday.uak_kriter_seti = setler[s].kimlik
+        else:
+            aday.uak_kriterleri_yeniden_saglandi = evet_hayir(
+                "Doçentlik başvuru dönemindeki ÜAK kriterlerini doçentlik başvurusu "
+                "sonrası çalışmalarınızla yeniden sağladınız mı? (Md. 11(2))")
 
     # Faaliyetler
     aday.faaliyetler = faaliyet_ekle_interaktif(aday.kadro_turu)
