@@ -15,6 +15,7 @@ from pathlib import Path
 
 import streamlit as st
 
+import arayuz_tema as ui
 import tnku_atama as t
 from kanit import KanitArsivi, aday_dosyasi, ayar
 from kanit import klasor as kk
@@ -104,7 +105,7 @@ def otomatik_yukle() -> None:
 
 def kanit_bolumu(aday_olustur) -> None:
     """Aday Bilgileri sekmesinin başındaki 'Kanıt klasörü' kartı."""
-    st.markdown('<div class="card-title">KANIT KLASÖRÜ (YEREL)</div>', unsafe_allow_html=True)
+    ui.kart_basligi("KANIT KLASÖRÜ (YEREL)")
     k1, k2, k3 = st.columns([4, 1, 1], gap="small")
     with k1:
         yeni = st.text_input("Kanıt klasörü", value=st.session_state.get("kanit_koku", ""),
@@ -172,11 +173,11 @@ def kanit_paneli(f, didx: int, a: KanitArsivi | None) -> str:
                 if k.atif_klasorleri():
                     st.caption(f"Atıf kanıtı: {len(k.atif_klasorleri())}")
         with c2:
-            if st.button("Klasörü aç", key=f"kac_{didx}", use_container_width=True):
+            if st.button("Klasörü aç", key=f"kac_{didx}", use_container_width=True, help="Bu faaliyetin kanıt klasörünü Dosya Gezgini'nde açar."):
                 dosya_ac(k.klasor)
         with c3:
             if k.tam_metin and st.button("Tam metni aç", key=f"tac_{didx}",
-                                         use_container_width=True):
+                                         use_container_width=True, help="Yayının tam metin PDF'ini açar."):
                 dosya_ac(k.tam_metin)
     else:
         st.caption("Bu faaliyet bir kanıt klasörüne bağlı değil.")
@@ -204,7 +205,7 @@ def aves_klasor_islemleri(a: KanitArsivi | None, faaliyetler) -> None:
     if plan:
         st.warning("🔢 AVES'teki sıra değişmiş; şu kanıt klasörlerinin kodu güncellenmeli:\n\n"
                    + "\n".join(f"- `{p.kayit.klasor.name}` → `{p.yeni_ad}`" for p in plan))
-        if st.button("Klasörleri yeniden adlandır", key="kanit_numara"):
+        if st.button("Klasörleri yeniden adlandır", key="kanit_numara", help="AVES'teki sıra değiştiği için kanıt klasörlerinin kodlarını (UM01, UB03…) günceller. Dosyalara dokunulmaz."):
             kk.numara_uygula(a, plan)
             st.success(f"{len(plan)} klasör yeniden adlandırıldı.")
             st.rerun()
@@ -212,7 +213,7 @@ def aves_klasor_islemleri(a: KanitArsivi | None, faaliyetler) -> None:
     if eksik:
         st.info(f"📁 AVES'teki {len(eksik)} faaliyetin kanıt klasörü yok: "
                 + ", ".join(f.aves_kod for f in eksik[:20]) + ("…" if len(eksik) > 20 else ""))
-        if st.button("Eksik klasörleri oluştur", key="kanit_olustur"):
+        if st.button("Eksik klasörleri oluştur", key="kanit_olustur", help='Kanıt klasörü olmayan yayınlar için künyeli boş klasör açar; belgeleri sonra içine koyarsınız.'):
             for f in eksik:
                 kk.klasor_olustur(a, f)
             st.success(f"{len(eksik)} klasör oluşturuldu (künye ve kontrol listesiyle).")
@@ -251,10 +252,10 @@ def _tarih_bolumu():
         st.caption(f"Yayın tarihi boş olan AVES faaliyeti: {len(bos)}. DOI'si olanlar Crossref'ten, "
                    "diğerleri AVES künyesindeki ay/yıldan doldurulur (yalnızca ay biliniyorsa "
                    "ayın 1'i – başvuruyla aynı aydaki eser temkinli olarak 'öncesi' sayılır).")
-        internet = st.checkbox("Crossref'i kullan (internet)", value=True, key="kt_crossref")
+        internet = st.checkbox("Crossref'i kullan (internet)", value=True, key="kt_crossref", help="DOI'si olan yayınların tarihini Crossref'ten alır (internet gerekir). Kapalıysa AVES künyesindeki tarih kullanılır.")
     with c2:
         if st.button("Tarihleri doldur", disabled=not bos, key="kt_tarih",
-                     use_container_width=True):
+                     use_container_width=True, help='Tarihi boş olan yayınlara yayın tarihini otomatik yazar. Doçentlik öncesi/sonrası ayrımı için gereklidir.'):
             with st.spinner("Tarihler bulunuyor…"):
                 oneriler = tarih.oneriler(bos, internet=internet)
             for f, o in oneriler:
@@ -269,7 +270,7 @@ def _atif_bolumu(a: KanitArsivi):
     from kanit import atif as ka_atif
     st.markdown("**2. Atıflar (EK-2 5.x)**")
     soyad = ((st.session_state.get("v_ad", "") or "").split() or [""])[-1]
-    if st.button("Atıfları kanıt klasöründen say", key="kt_atif_say"):
+    if st.button("Atıfları kanıt klasöründen say", key="kt_atif_say", help='Yayın klasörlerinizin atiflar\\ alt klasörlerindeki atıf yapan yayınları sayar; endeksi ve öz atıfları ayırır.'):
         with st.spinner("Atıf klasörleri taranıyor…"):
             st.session_state["_kt_atiflar"] = ka_atif.atiflari_topla(a, soyad)
     atiflar = st.session_state.get("_kt_atiflar")
@@ -300,14 +301,14 @@ def _atif_bolumu(a: KanitArsivi):
     with b1:
         belirsiz_kod = st.selectbox("Endeksi belirlenemeyenler", key="kt_belirsiz",
                                     options=list(BELIRSIZ_SECENEK),
-                                    format_func=BELIRSIZ_SECENEK.get)
+                                    format_func=BELIRSIZ_SECENEK.get, help="Endeksi okunamayan atıfların hangi EK-2 koduyla sayılacağı. Emin değilseniz 'Ekleme' seçin.")
     with b2:
         scholar_kaldir = st.checkbox(
             "Google Scholar'dan gelen atıf (5.1) ve h-endeks (5.9) satırlarını kaldır",
             value=True, key="kt_scholar",
             help="AVES aktarımı Scholar atıf sayısını tek bir 5.1 satırı olarak ekler; "
                  "kanıtlı sayım onun yerine geçer.")
-    if st.button("Faaliyet listesine uygula", key="kt_atif_uygula", type="primary"):
+    if st.button("Faaliyet listesine uygula", key="kt_atif_uygula", type="primary", help='Sayılan atıfları EK-2 5.x satırları olarak faaliyet listesine ekler (önceki atıf satırlarının yerine geçer).'):
         yeni = ka_atif.faaliyetler(atiflar, basvuru, belirsiz_kod or None, t.Faaliyet)
         kalan = [f for f in st.session_state.faaliyetler
                  if not f.kimlik.startswith("atif:")
@@ -330,7 +331,7 @@ def _wos_bolumu(a: KanitArsivi):
                "→ Web of Science Index süzgeci (SCI-EXPANDED, SSCI, A&HCI, ESCI, BKCI) → Export → "
                "'Tab delimited file', Record content: 'Full Record and Cited References'.")
     if (a.kok / wos.INDIRILECEK_LISTESI).exists():
-        if st.button("Tam metni eksik atıflar için açık erişimi yeniden dene", key="kt_wos_yeniden"):
+        if st.button("Tam metni eksik atıflar için açık erişimi yeniden dene", key="kt_wos_yeniden", help="Tam metni olmayan atıflar için açık erişimli PDF'i yeniden arar ve bulursa indirir."):
             cubuk = st.progress(0.0, text="Açık erişim aranıyor…")
             sayac = wos.eksikleri_indir(
                 a, ilerleme=lambda i, n, p: cubuk.progress(i / n, text=f"{i}/{n}"))
@@ -342,10 +343,10 @@ def _wos_bolumu(a: KanitArsivi):
         y1, y2 = st.columns([3, 1])
         with y1:
             ind = st.text_input("İndirilen PDF'lerin klasörü", key="kt_indirilen",
-                                value=str(Path.home() / "Downloads"))
+                                value=str(Path.home() / "Downloads"), help="Tarayıcıdan indirdiğiniz atıf PDF'lerinin bulunduğu klasör (genellikle İndirilenler).")
         with y2:
             if st.button("Klasörlere yerleştir", key="kt_yerlestir",
-                         disabled=not Path(ind).is_dir()):
+                         disabled=not Path(ind).is_dir(), help="Bu klasördeki PDF'leri ilk sayfalarındaki DOI ya da başlığa göre doğru atıf klasörüne kopyalar."):
                 sayac = wos.indirilenleri_yerlestir(a, Path(ind))
                 st.session_state.pop("_kt_atiflar", None)
                 st.success(f"Yerleştirilen: {sayac['yerleştirildi']} · eşleşmeyen PDF: "
@@ -355,7 +356,7 @@ def _wos_bolumu(a: KanitArsivi):
                     st.info(f"{wos.INDIRILECEK_LISTESI} Excel'de açık olduğu için güncel liste "
                             f"'{guncel.name}' adıyla kaydedildi.")
     yuklenen = st.file_uploader("WoS dışa aktarım dosyası (.txt / .xlsx)", type=["txt", "xlsx"],
-                                accept_multiple_files=True, key="kt_wos_dosya")
+                                accept_multiple_files=True, key="kt_wos_dosya", help="Web of Science'tan indirdiğiniz 'atıf yapan yayınlar' dosyasını buraya sürükleyin.")
     if not yuklenen:
         return
     hedef_klasor = a.kok / "_WoS"
@@ -373,9 +374,9 @@ def _wos_bolumu(a: KanitArsivi):
     w1, w2 = st.columns(2)
     with w1:
         esci = st.checkbox("ESCI (5.2) ve Book Citation Index (5.7) atıflarını da ekle",
-                           value=True, key="kt_wos_esci")
+                           value=True, key="kt_wos_esci", help='İşaretliyse yalnızca SCI değil ESCI ve kitap (BKCI) atıfları da klasörlenir.')
     with w2:
-        indir = st.checkbox("Açık erişimli tam metinleri indir", value=True, key="kt_wos_indir")
+        indir = st.checkbox("Açık erişimli tam metinleri indir", value=True, key="kt_wos_indir", help="Atıf yapan yayın açık erişimliyse PDF'ini de indirip klasörüne koyar.")
     soyad = ((st.session_state.get("v_ad", "") or "").split() or [""])[-1]
     plan = wos.plan_olustur(a, kayitlar, soyad, ("5.1", "5.2", "5.7") if esci else ("5.1",))
     tablo = {}
@@ -392,7 +393,7 @@ def _wos_bolumu(a: KanitArsivi):
                + (f" · hiçbir yayınınızla eşleşmeyen: {esles} (kaynakçada DOI / cilt-sayfa "
                   "bulunamadı)" if esles else ""))
     if st.button(f"{yeni} atıf klasörünü oluştur", key="kt_wos_uygula", disabled=not yeni,
-                 type="primary"):
+                 type="primary", help='Yeni bulunan her atıf yapan yayın için ilgili yayınınızın atiflar\\ klasöründe bir alt klasör açar.'):
         cubuk = st.progress(0.0, text="Atıf klasörleri oluşturuluyor…")
         sayac = wos.uygula(plan, a, indir=indir,
                            ilerleme=lambda i, n, p: cubuk.progress(i / n, text=f"{i}/{n} {p.wos.baslik[:60]}"))
@@ -416,7 +417,7 @@ def _ders_bolumu(a: KanitArsivi):
     d1, d2 = st.columns(2)
     with d1:
         st.caption(f"EK-2 17.4 (son üç yıl): **{len(o.son_uc_yil)} dönem**")
-        if st.button("17.4 satırını ekle / güncelle", key="kt_ders174", disabled=not o.son_uc_yil):
+        if st.button("17.4 satırını ekle / güncelle", key="kt_ders174", disabled=not o.son_uc_yil, help='Ders klasörlerinden bulunan son üç yıldaki dönem sayısıyla EK-2 17.4 satırını ekler.'):
             ders = next(d for d in a.diger_klasorler if d.name.upper().startswith("DERS"))
             _faaliyet_ekle_ya_da_guncelle(
                 t.Faaliyet("17.4", adet=len(o.son_uc_yil), docent_sonrasi=True,
@@ -427,7 +428,7 @@ def _ders_bolumu(a: KanitArsivi):
         if st.session_state.get("v_docent_unvan"):
             st.caption(f"Md. 11(7) doçentlik sonrası yarıyıl: **{len(o.unvan_sonrasi)}** (≥4 gerekli)")
             st.button("Sayıyı Aday Bilgileri'ne yaz", key="kt_ders117",
-                      on_click=_ders_sayisi_cb, args=(len(o.unvan_sonrasi),))
+                      on_click=_ders_sayisi_cb, args=(len(o.unvan_sonrasi),), help="Doçentlik sonrası bulunan ders dönemi sayısını Aday Bilgileri'ndeki ilgili alana yazar.")
         else:
             st.caption("Md. 11(7) için doçentlik unvan tarihini girin.")
     if st.session_state.get("v_kadro") == "profesor" and len(o.unvan_sonrasi) < 4:
@@ -446,17 +447,17 @@ def _klasorden_ekle_bolumu(a: KanitArsivi):
     e1, e2, e3 = st.columns([3, 2, 1])
     with e1:
         sec = st.selectbox("Klasör", options=klasorler, key="kt_klasor",
-                           format_func=lambda d: str(d.relative_to(a.kok)))
+                           format_func=lambda d: str(d.relative_to(a.kok)), help='Faaliyet olarak eklemek istediğiniz kanıt klasörü (proje, hakemlik, idari görev…).')
     onek = sec.relative_to(a.kok).parts[0].split("_")[0].upper()
     kodlar = KLASOR_KODLARI.get(onek, list(t.EK2_PUANLAR))
     with e2:
         kod = st.selectbox("EK-2 kodu", options=kodlar, key="kt_kod",
-                           format_func=lambda k: f"{k} – {t.EK2_PUANLAR[k]['ad'][:40]}")
+                           format_func=lambda k: f"{k} – {t.EK2_PUANLAR[k]['ad'][:40]}", help='Bu klasördeki faaliyetin EK-2 kodu.')
     with e3:
-        adet = st.number_input("Adet", min_value=1, value=1, key="kt_adet")
+        adet = st.number_input("Adet", min_value=1, value=1, key="kt_adet", help='Bu klasördeki faaliyetin adedi (yıl, dönem ya da sayı).')
     st.caption("Klasördeki dosyalar: "
                + ", ".join(p.name for p in sorted(sec.rglob("*")) if p.is_file())[:300])
-    if st.button("Faaliyet olarak ekle", key="kt_klasor_ekle"):
+    if st.button("Faaliyet olarak ekle", key="kt_klasor_ekle", help='Seçtiğiniz klasörü, seçtiğiniz EK-2 koduyla faaliyet listesine ekler ve kanıt olarak bağlar.'):
         st.session_state.faaliyetler.append(t.Faaliyet(kod, adet=int(adet),
                                                        kimlik=a.klasor_kimligi(sec)))
         st.rerun()
@@ -486,7 +487,7 @@ def denetim_bolumu(faaliyetler, a: KanitArsivi | None) -> list:
     import pandas as pd
     from kanit.denetim import denetle
     uyarilar = denetle(faaliyetler, a)
-    st.markdown('<div class="card-title">KANIT DENETİMİ</div>', unsafe_allow_html=True)
+    ui.kart_basligi("KANIT DENETİMİ")
     if not uyarilar:
         st.success("✓ Puan alan tüm faaliyetlerin kanıtları kanıt klasöründe görünüyor.")
         return uyarilar
@@ -520,22 +521,21 @@ def paket_bolumu(aday, sonuc, a: KanitArsivi | None, rapor_pdf) -> None:
     if a is None:
         return
     from kanit import paket
-    st.markdown('<div class="card-title">BAŞVURU DOSYASI (USB KLASÖRÜ + BİRLEŞİK PDF)</div>',
-                unsafe_allow_html=True)
+    ui.kart_basligi("BAŞVURU DOSYASI (USB KLASÖRÜ + BİRLEŞİK PDF)")
     st.caption("Puan alan faaliyetler EK-2 sırasıyla, tam metin ve kanıtlarıyla birlikte hazırlanır "
                "(Md. 6(1): fiziksel dosya + USB). Kaynak klasörlere dokunulmaz.")
     s1, s2 = st.columns(2)
     with s1:
-        atif_k = st.checkbox("Atıf kanıtlarını ekle", value=True, key="pk_atif")
+        atif_k = st.checkbox("Atıf kanıtlarını ekle", value=True, key="pk_atif", help='Atıf yapan yayınların ilk sayfası ve atıf sayfası dosyaya eklenir.')
         atif_tam = st.checkbox("Yalnızca tam metni olan atıfları ekle", value=False, key="pk_atif_tam",
                                help="Tam metni olan atıflar her durumda önce gelir. İşaretlenirse "
                                     "yalnızca WoS kaydıyla belgelenen atıflar dosyaya girmez "
                                     "(puanda sayılmaya devam eder; kalemde not düşülür).")
         oncesi = st.checkbox("Doçentlik başvurusu öncesi faaliyetleri de ekle", value=True,
-                             key="pk_oncesi")
+                             key="pk_oncesi", help='Kapalıysa yalnızca doçentlik başvurusu sonrası faaliyetlerin kanıtları dosyaya girer.')
     with s2:
         kitap = st.checkbox("Bildiri kitaplarının tamamını ekle (yoksa kesilmiş sayfalar)",
-                            value=False, key="pk_kitap")
+                            value=False, key="pk_kitap", help='Kapalıysa bildiri kitabından yalnızca kapak, künye ve bildirinizin sayfaları alınır (dosya küçük kalır).')
         hafif = st.checkbox("Birleşik PDF'i hafiflet (taranmış belgeler 110 dpi)", value=True,
                             key="pk_hafif", help="USB klasöründeki dosyalar özgün kalır; tam "
                                                   "metinlere dokunulmaz.")
@@ -544,10 +544,10 @@ def paket_bolumu(aday, sonuc, a: KanitArsivi | None, rapor_pdf) -> None:
                if any(x in p.name.lower().replace("ı", "i") for x in GENEL_BELGE_ONSECIM)]
     genel = st.multiselect("Genel belgeler (dosyanın başına eklenir)", options=adaylar,
                            default=onsecim, key="pk_genel",
-                           format_func=lambda p: str(p.relative_to(a.kok)))
+                           format_func=lambda p: str(p.relative_to(a.kok)), help='Özgeçmiş, diploma, yabancı dil belgesi gibi her başvuruda istenen belgeler.')
     cikti = st.text_input("Çıktı klasörü", value=str(a.kok / "_Basvuru_Dosyalari"),
-                          key="pk_cikti")
-    if st.button("📦 Başvuru dosyasını hazırla", type="primary", key="pk_hazirla"):
+                          key="pk_cikti", help='Başvuru dosyasının (USB klasörü ve birleşik PDF) kaydedileceği yer.')
+    if st.button("📦 Başvuru dosyasını hazırla", type="primary", key="pk_hazirla", help="Puan alan faaliyetleri kanıtlarıyla birlikte EK-2 sırasına dizer; USB'ye kopyalanacak klasörü ve yazdırılacak tek PDF'i oluşturur."):
         ayar = paket.PaketAyarlari(atif_kanitlari=atif_k, docent_oncesi=oncesi,
                                    atif_yalniz_tam_metin=atif_tam,
                                    tam_bildiri_kitabi=kitap, hafiflet=hafif, genel_belgeler=genel)
@@ -566,10 +566,10 @@ def paket_bolumu(aday, sonuc, a: KanitArsivi | None, rapor_pdf) -> None:
                f"{ps.boyut_mb:.0f} MB · USB klasörü {usb_mb:.0f} MB\n\n`{ps.klasor}`")
     b1, b2 = st.columns(2)
     with b1:
-        if st.button("📂 Klasörü aç", key="pk_klasor_ac", use_container_width=True):
+        if st.button("📂 Klasörü aç", key="pk_klasor_ac", use_container_width=True, help="Hazırlanan USB klasörünü Dosya Gezgini'nde açar."):
             dosya_ac(ps.klasor)
     with b2:
-        if st.button("📄 Birleşik PDF'i aç", key="pk_pdf_ac", use_container_width=True):
+        if st.button("📄 Birleşik PDF'i aç", key="pk_pdf_ac", use_container_width=True, help="Yazdırılmaya hazır birleşik PDF'i açar."):
             dosya_ac(ps.pdf)
     eksikli = [k for k in ps.kalemler if k.eksikler or not k.dosyalar]
     if eksikli:
