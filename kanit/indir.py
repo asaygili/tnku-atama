@@ -123,3 +123,37 @@ def pdf_indir(url: str, hedef: Path, s=None, deneme: int = 6) -> tuple[bool, str
             time.sleep(10)
             son_hata = type(e).__name__
     return False, locals().get("son_hata", "tekrar denemeler başarısız")
+
+
+def indirme_klasoru() -> Path:
+    """Tarayıcının PDF indirdiği klasör: Windows'un İndirilenler klasörü (başka sürücüye
+    taşınmış olabilir), Chrome/Edge ayarı ve ~/Downloads arasından en son PDF inen."""
+    import json
+    import os
+    adaylar = []
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion"
+                            r"\Explorer\User Shell Folders") as k:
+            deger = winreg.QueryValueEx(k, "{374DE290-123F-4565-9164-39C4925E467B}")[0]
+            adaylar.append(Path(os.path.expandvars(deger)))
+    except (ImportError, OSError):
+        pass
+    yerel = os.environ.get("LOCALAPPDATA", "")
+    for tarayici in ("Google/Chrome", "Microsoft/Edge"):
+        ayar = Path(yerel) / tarayici / "User Data" / "Default" / "Preferences"
+        try:
+            d = json.loads(ayar.read_text(encoding="utf-8", errors="ignore"))
+            if yol := (d.get("download") or {}).get("default_directory"):
+                adaylar.append(Path(yol))
+        except (OSError, ValueError):
+            pass
+    adaylar.append(Path.home() / "Downloads")
+    adaylar = [a for a in dict.fromkeys(adaylar) if a.is_dir()]
+
+    def son_pdf(k: Path) -> float:
+        try:
+            return max((p.stat().st_mtime for p in k.glob("*.pdf")), default=0.0)
+        except OSError:
+            return 0.0
+    return max(adaylar, key=son_pdf) if adaylar else Path.home() / "Downloads"

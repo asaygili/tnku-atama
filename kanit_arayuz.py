@@ -322,6 +322,12 @@ def _atif_bolumu(a: KanitArsivi):
         st.success(m)
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _indirme_klasoru() -> str:
+    from kanit.indir import indirme_klasoru
+    return str(indirme_klasoru())
+
+
 def _wos_bolumu(a: KanitArsivi):
     import pandas as pd
     from collections import Counter
@@ -343,14 +349,17 @@ def _wos_bolumu(a: KanitArsivi):
         y1, y2 = st.columns([3, 1])
         with y1:
             ind = st.text_input("İndirilen PDF'lerin klasörü", key="kt_indirilen",
-                                value=str(Path.home() / "Downloads"), help="Tarayıcıdan indirdiğiniz atıf PDF'lerinin bulunduğu klasör (genellikle İndirilenler).")
+                                value=_indirme_klasoru(), help="Tarayıcıdan indirdiğiniz atıf PDF'lerinin bulunduğu klasör (genellikle İndirilenler).")
         with y2:
             if st.button("Klasörlere yerleştir", key="kt_yerlestir",
                          disabled=not Path(ind).is_dir(), help="Bu klasördeki PDF'leri ilk sayfalarındaki DOI ya da başlığa göre doğru atıf klasörüne kopyalar."):
                 sayac = wos.indirilenleri_yerlestir(a, Path(ind))
                 st.session_state.pop("_kt_atiflar", None)
-                st.success(f"Yerleştirilen: {sayac['yerleştirildi']} · eşleşmeyen PDF: "
-                           f"{sayac['eşleşmedi']}")
+                (st.success if sayac["yerleştirildi"] else st.warning)(
+                    f"Yerleştirilen: {sayac['yerleştirildi']} · eşleşmeyen PDF: {sayac['eşleşmedi']}"
+                    + ("" if sayac["yerleştirildi"] else
+                       f". Hiçbiri eşleşmedi: indirdiğiniz makaleler bu klasörde olmayabilir. "
+                       f"Tarayıcınızın indirme klasörü büyük olasılıkla: {_indirme_klasoru()}"))
                 guncel = a.kok / (Path(wos.INDIRILECEK_LISTESI).stem + " (güncel).xlsx")
                 if guncel.exists() and guncel.stat().st_mtime > time.time() - 60:
                     st.info(f"{wos.INDIRILECEK_LISTESI} Excel'de açık olduğu için güncel liste "
