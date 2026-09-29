@@ -476,7 +476,11 @@ def doldurma_bolumu(a: KanitArsivi | None) -> None:
     """Faaliyetler sekmesindeki 'Kanıt klasöründen doldur' bölümü."""
     if a is None:
         return
-    with st.expander("🗂️ Kanıt klasöründen doldur (tarih, atıf, ders, klasörden faaliyet)"):
+    with st.expander("🛠️ Elle düzeltme ve ek araçlar (isteğe bağlı)"):
+        st.info("**⚡ Yükle ve Ekle** tarihleri, atıfları, dersleri ve kanıt bağlantılarını zaten "
+                "otomatik doldurur. Bu bölümü yalnızca bir adımı tekrar çalıştırmak (ör. yeni atıf "
+                "PDF'leri ekledikten sonra atıfları yeniden saymak), Web of Science dosyası yüklemek "
+                "ya da AVES'te olmayan bir faaliyeti klasörden eklemek için kullanın.")
         _tarih_bolumu()
         st.divider()
         _atif_bolumu(a)

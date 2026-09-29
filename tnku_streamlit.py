@@ -1162,6 +1162,8 @@ def _faaliyet_etiketi(f, uzunluk: int = 70) -> tuple[str, str]:
     if a is not None and (kay := a.bul(f)) is not None:
         ad = ad or (ay.baslik_cikar(kay.kunye) if kay.kunye else "") or kay.klasor.name
         kod = kod or kay.aves_kod or ""
+    if not kunye and not getattr(f, "aves_kod", ""):
+        ad = f"{t.EK2_PUANLAR.get(f.kod, {}).get('ad', '')} – {f.adet} adet"   # ör. 17.4 dersler
     ad = ad or kunye or t.EK2_PUANLAR.get(f.kod, {}).get("ad", "")
     ad = " ".join(ad.split())
     return kod or "—", (ad[:uzunluk - 1] + "…") if len(ad) > uzunluk else ad
@@ -1504,7 +1506,9 @@ def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
                            leftIndent=12, spaceAfter=3, textColor=colors.HexColor("#2E5DA3"))
 
     kunye_listesi = [(i+1, k) for i, k in enumerate(faaliyet_kunye) if k.strip()]
-    if kunye_listesi:
+    kunyesiz = [(i + 1, f) for i, f in enumerate(aday.faaliyetler)
+                if not (faaliyet_kunye[i] if i < len(faaliyet_kunye) else "").strip()]
+    if kunye_listesi or kunyesiz:
         elems.append(Paragraph("KUNYE LISTESI", s_sec))
         for no, k in kunye_listesi:
             f_idx = no - 1
@@ -1533,6 +1537,17 @@ def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
             if fo and fo.docent_sonrasi: dergi_parts.append("[Docent Sonrasi]")
             if dergi_parts:
                 elems.append(Paragraph(", ".join(dergi_parts), s_kb))
+        elems.append(Spacer(1, 10))
+        # Künyesi olmayan faaliyetler (kanıt arşivinden sayılan atıflar, dersler, elle eklenenler)
+        for no, fo in kunyesiz:
+            kod, ad = _faaliyet_etiketi(fo, 110)
+            elems.append(Paragraph(f"<b>#{no}</b>  {fo.kod}", s_kh))
+            kanit = ("yayın klasörlerindeki atiflar\\ alt klasörleri"
+                     if (fo.kimlik or "").startswith("atif:") else
+                     fo.kimlik[len("klasor:"):] if (fo.kimlik or "").startswith("klasor:") else "")
+            elems.append(Paragraph(_xml_escape(ad), s_ks))
+            if kanit:
+                elems.append(Paragraph(_xml_escape("Kanıt: " + kanit), s_kb))
         elems.append(Spacer(1, 10))
     else:
         elems.append(Spacer(1, 14))
@@ -1788,6 +1803,8 @@ with tab1:
     aves_url_v  = st.session_state.get("v_aves_url", "")
     aves_isim_v = st.session_state.get("v_ad", "")
 
+    if _rapor_satir := st.session_state.pop("_aves_rapor", None):
+        st.success("**Yükleme tamamlandı**\n\n" + "\n".join(f"- {r}" for r in _rapor_satir))
     ka.aves_klasor_islemleri(ka.arsiv(), st.session_state.faaliyetler)
     for _tekrar, _tutulan, _kunye in st.session_state.get("_aves_tekrarlar", []):
         st.warning(f"⚠️ **{_tekrar}**, AVES'te **{_tutulan}** ile aynı eser olarak "
@@ -1806,7 +1823,11 @@ with tab1:
     with ba1:
         if st.button("⚡ Yükle ve Ekle", type="primary",
                      use_container_width=True,
-                     help="AVES verisini otomatik çekip listeye ekler"):
+                     help="Tek tıkla her şey: AVES'ten yayın, bildiri, proje, hakemlik ve idari "
+                          "görevleri alır; kanıt klasörü varsa tarihleri, atıfları, dersleri ve "
+                          "kanıt bağlantılarını doldurur; puanınızı hesaplar. Daha önce "
+                          "düzelttiğiniz bilgiler (Q değeri vb.) korunur, hiçbir şey iki kez "
+                          "eklenmez."):
             url  = (aves_url_v or "").strip()
             isim = (aves_isim_v or "").strip()
             if not url:
@@ -1823,8 +1844,28 @@ with tab1:
                             st.error(f"Detay: {_aves_son_hata[0]}")
                         yeni = []
                 if yeni:
-                    st.session_state.faaliyetler.extend(yeni)
-                    st.success(f"✅ {len(yeni)} faaliyet eklendi!")
+                    from kanit import otomatik as _oto
+                    _rapor = [f"⚡ AVES'ten {len(yeni)} faaliyet alındı (önceki liste güncellendi, "
+                              f"tekrar eklenen yok)"]
+                    _liste = _oto.birlestir(list(st.session_state.faaliyetler), yeni)
+                    _a = ka.arsiv()
+                    if _a is not None:
+                        with st.spinner("Kanıt klasöründen tarih, atıf, ders ve bağlantılar "
+                                        "dolduruluyor…"):
+                            _liste, _r = _oto.doldur(
+                                _liste, _a, (isim.split() or [""])[-1],
+                                st.session_state.get("v_docent_basvuru"),
+                                st.session_state.get("v_docent_unvan"),
+                                st.session_state.get("v_kadro", ""), t.Faaliyet)
+                        _rapor += _r
+                    st.session_state.faaliyetler = _liste
+                    _aday = _aday_olustur()
+                    st.session_state.son_aday = _aday
+                    st.session_state.sonuc = t.kriter_kontrol(_aday)
+                    _p = st.session_state.sonuc["puanlar"]
+                    _rapor.append(f"📊 Hesaplandı: toplam {_p['toplam']:g} puan (PUAN-1 {_p['puan1']:g}, "
+                                  f"PUAN-2 {_p['puan2']:g}) – sonuçlar sayfanın altında")
+                    st.session_state["_aves_rapor"] = _rapor
                     st.rerun()
                 else:
                     st.warning(

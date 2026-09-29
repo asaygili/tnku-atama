@@ -155,3 +155,39 @@ class YayinDisiBaglama(GeciciArsiv):
         disarida = denetim.tavan_disi(hak, a)
         self.assertEqual(len(disarida), 3)
         self.assertEqual(len(denetim.denetle(hak, a)), 4)
+
+
+class TekTikla(GeciciArsiv):
+    def test_birlestir_cift_eklemez_duzeltmeyi_korur(self):
+        from kanit import otomatik
+        F = t.Faaliyet
+        eski = [F("1.1", aves_kod="UM01", kimlik="doi:10.1/a", q_degeri="Q1", baslica_eser=True),
+                F("1.1", aves_kod="UM02", kimlik="doi:10.1/b"),
+                F("12.6", aves_kod="PR01", kimlik="klasor:PROJE_TUBITAK/x"),
+                F("5.1", adet=40, kimlik="atif:5.1:sonrası"),
+                F("19.1")]                                           # elle eklenmiş
+        yeni = [F("1.1", aves_kod="UM02", kimlik="doi:10.1/a"),     # AVES sırası kaydı
+                F("1.1", aves_kod="UM01", kimlik="doi:10.1/c"),     # yeni yayın
+                F("12.6", aves_kod="PR01")]
+        b = otomatik.birlestir(eski, yeni)
+        self.assertEqual(len(b), 5)            # 3 AVES + elle eklenen + atıf (doldur yeniler)
+        a_ = next(f for f in b if f.kimlik == "doi:10.1/a")
+        self.assertEqual((a_.aves_kod, a_.q_degeri, a_.baslica_eser), ("UM02", "Q1", True))
+        self.assertEqual(next(f for f in b if f.kod == "12.6").kimlik, "klasor:PROJE_TUBITAK/x")
+        self.assertIn("19.1", [f.kod for f in b])
+
+    def test_doldur_atif_ders_baslica(self):
+        from kanit import otomatik
+        d = self.yayin()
+        pdf_yaz(d / "atiflar" / "a1" / "citing.pdf",
+                ["Science Citation Index Expanded journal, 2025, doi:10.9/zz", "b", "c"])
+        pdf_yaz(self.kok / "DERS_Verilen_Dersler" / "2025-2026_GUZ.pdf", ["ders"])
+        F = t.Faaliyet
+        m = F("1.1", aves_kod="UM01", kimlik="", yayin_tarihi=date(2024, 3, 1))
+        liste, rapor = otomatik.doldur([m], KanitArsivi(self.kok), "Yılmaz", date(2023, 1, 4),
+                                       date(2023, 6, 1), "profesor", F, internet=False)
+        kodlar = sorted(f.kod for f in liste)
+        self.assertIn("5.1", kodlar)
+        self.assertIn("17.4", kodlar)
+        self.assertTrue(m.baslica_eser)
+        self.assertTrue(any("Başlıca" in r for r in rapor))
