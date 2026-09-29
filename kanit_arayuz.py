@@ -494,16 +494,37 @@ def denetim_bolumu(faaliyetler, a: KanitArsivi | None) -> list:
     if a is None:
         return []
     import pandas as pd
-    from kanit.denetim import denetle
+    from kanit.denetim import denetle, tavan_disi
+    from kanit import bagla
+    oner = bagla.oneriler(a, faaliyetler)
     uyarilar = denetle(faaliyetler, a)
     ui.kart_basligi("KANIT DENETİMİ")
+    if oner:
+        st.info(f"🔗 {len(oner)} proje / hakemlik / idari görev, arşivdeki bir kanıt klasörüyle "
+                "eşleşiyor ama henüz bağlanmamış.")
+        with st.expander("Önerilen bağlantıları göster"):
+            st.dataframe(pd.DataFrame([{"Kod": o.faaliyet.aves_kod or "—", "EK-2": o.faaliyet.kod,
+                                        "Faaliyet": bagla._ad(o.faaliyet)[:60],
+                                        "Klasör": str(o.klasor.relative_to(a.kok)),
+                                        "Neden": o.neden} for o in oner]),
+                         hide_index=True, use_container_width=True)
+        if st.button("🔗 Önerilen klasörleri bağla", key="kt_bagla",
+                     help="Proje, hakemlik ve idari görev faaliyetlerini, içeriği eşleşen kanıt "
+                          "klasörlerine bağlar. Bağlantıyı faaliyetin düzenleme panelinden "
+                          "değiştirebilirsiniz."):
+            bagla.uygula(a, oner)
+            st.rerun()
+    disarida = tavan_disi(faaliyetler, a)
+    if disarida:
+        st.caption(f"ℹ️ {len(disarida)} faaliyet grup üst sınırı (ör. hakemlik en fazla 20 puan) "
+                   "dolduğu için puan almıyor; bunların kanıtı gerekmez ve listede gösterilmez.")
     if not uyarilar:
         st.success("✓ Puan alan tüm faaliyetlerin kanıtları kanıt klasöründe görünüyor.")
         return uyarilar
     st.warning(f"⚠️ {len(uyarilar)} faaliyetin kanıtı eksik görünüyor. Puan hesabı değişmez; "
                "ancak yönerge (Md. 7) tüm faaliyetlerin belgelenmesini şart koşar.")
-    st.dataframe(pd.DataFrame([{"#": u.sira, "AVES": u.aves_kod or "—", "EK-2": u.kod,
-                                "Faaliyet": u.ad[:45], "Eksik": " · ".join(u.eksikler)}
+    st.dataframe(pd.DataFrame([{"#": u.sira, "Kod": u.aves_kod or "—", "EK-2": u.kod,
+                                "Faaliyet": u.etiket or u.ad[:45], "Eksik": " · ".join(u.eksikler)}
                                for u in uyarilar]), hide_index=True, use_container_width=True)
     return uyarilar
 

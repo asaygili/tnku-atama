@@ -597,10 +597,11 @@ try:
         # 12. Proje
         blok = veri.get("proje")
         if blok:
-            for o in blok.get("ogeler", []):
+            for p_sira, o in enumerate(blok.get("ogeler", []), 1):
                 m = o.get("metin","").lower()
                 kod, p_bas, p_bit, p_devam = ay.proje_ek2(o.get("metin", ""))
                 f_obj5 = t.Faaliyet(kod=kod, adet=1, devam_ediyor=p_devam,
+                                    aves_kod=f"PR{p_sira:02d}",
                                     yayin_tarihi=(p_bas if p_devam else p_bit),
                                     docent_sonrasi=_docent_sonrasi_mi(m))
                 # ÜAK 7a/7b yalnızca AB Çerçeve Programı; diğer AB destekli projeler 7c
@@ -613,10 +614,10 @@ try:
         # 6. Hakemlik (grup tavanı 20)
         blok = veri.get("hakemlik")
         if blok:
-            for o in blok.get("ogeler", []):
+            for h_sira, o in enumerate(blok.get("ogeler", []), 1):
                 h_kod, h_adet, h_yil = ay.hakemlik_ek2(o.get("endeks"), o.get("metin", ""),
                                                         o.get("tip", ""))
-                f_h = t.Faaliyet(kod=h_kod, adet=h_adet,
+                f_h = t.Faaliyet(kod=h_kod, adet=h_adet, aves_kod=f"HK{h_sira:02d}",
                                  yayin_tarihi=(min(datetime.date(h_yil, 12, 31),
                                                    datetime.date.today()) if h_yil else None),
                                  docent_sonrasi=_docent_sonrasi_mi(o.get("metin", "")))
@@ -624,10 +625,10 @@ try:
                 ekle(f_h)
 
         # 18. İdari görevler (her bir yıl için)
-        for gorev in (veri.get("_idari_gorev") or []):
+        for i_sira, gorev in enumerate(veri.get("_idari_gorev") or [], 1):
             sonuc_i = ay.idari_ek2(gorev.get("unvan", ""), gorev.get("tarih", ""))
             if sonuc_i and sonuc_i[1] > 0:
-                f_i = t.Faaliyet(kod=sonuc_i[0], adet=sonuc_i[1])
+                f_i = t.Faaliyet(kod=sonuc_i[0], adet=sonuc_i[1], aves_kod=f"IG{i_sira:02d}")
                 f_i._kunye = f"{gorev.get('unvan', '')} ({gorev.get('tarih', '')})"
                 ekle(f_i)
 
@@ -1368,11 +1369,12 @@ def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
             elems.append(Paragraph(_xml_escape("Puan alan tüm faaliyetlerin kanıtları kanıt "
                                                "klasöründe bulunmaktadır."), s_xs))
         else:
-            ddata = [["#", "AVES", "EK-2", "Eksik kanıt"]]
+            ddata = [["#", "Kod", "EK-2", "Faaliyet", "Eksik kanıt"]]
             for u in _uyarilar:
                 ddata.append([str(u.sira), u.aves_kod or "–", u.kod,
+                              Paragraph(_xml_escape(u.etiket or u.ad), s_kc),
                               Paragraph(_xml_escape(" · ".join(u.eksikler)), s_kc)])
-            dt_ = Table(ddata, repeatRows=1, colWidths=[0.8*cm, 1.4*cm, 1.2*cm, 14*cm])
+            dt_ = Table(ddata, repeatRows=1, colWidths=[0.8*cm, 1.3*cm, 1.1*cm, 6.2*cm, 8.0*cm])
             dt_.setStyle(tbl_style(colors.HexColor("#B45309")))
             elems.append(dt_)
         elems.append(Spacer(1, 10))

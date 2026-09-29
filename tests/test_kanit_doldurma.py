@@ -122,3 +122,36 @@ class Denetim(GeciciArsiv):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class YayinDisiBaglama(GeciciArsiv):
+    def test_proje_hakemlik_idari_baglanir(self):
+        from kanit import bagla
+        pdf_yaz(self.kok / "PROJE_BAP" / "Docentlik2023_BAP" / "sonuc.pdf",
+                ["BAP Komisyonu: Goruntu Isleme ve Yapay Ogrenme Yontemleri ile Medikal Goruntulerden "
+                 "Hastalik Teshisi projesinin sonuc raporu kabul edilmistir."])   # PDF yazıcısı ASCII
+        pdf_yaz(self.kok / "PROJE_TUBITAK" / "Tesvik2026" / "a.pdf",
+                ["TUBITAK: Medikal Goruntulerden Hastalik Teshisi yontemleri"])
+        pdf_yaz(self.kok / "HAKEM_Hakemlikler" / "Atama2019" / "IEEE Access tesekkur.pdf", ["x"])
+        (self.kok / "IDARI_Gorevler" / "Docentlik2023_Dekan Yardımcılığı Görevi").mkdir(parents=True)
+        F = t.Faaliyet
+        bap = F("12.11", aves_kod="PR01")
+        bap._kunye = ("Görüntü İşleme Ve Yapay Öğrenme Yöntemleri İle Medikal Görüntülerden Hastalık "
+                      "Teşhisi, Yükseköğretim Kurumları tarafından destekli, Yürütücü. 2021 - 2022.")
+        eski = F("6.3", aves_kod="HK01", yayin_tarihi=date(2018, 12, 31))
+        eski._kunye = "IEEE Access, 2018, Hakemlik Sayısı:2."
+        yeni = F("6.3", aves_kod="HK02", yayin_tarihi=date(2025, 12, 31))
+        yeni._kunye = "IEEE Access, 2025, Hakemlik Sayısı:1."        # 2019 klasörü belgeleyemez
+        dekan = F("18.3", adet=5, aves_kod="IG01")
+        dekan._kunye = "Dekan Yardımcısı (2019-2024)"
+        a = KanitArsivi(self.kok)
+        o = {x.faaliyet.aves_kod: x.klasor.name for x in bagla.oneriler(a, [bap, eski, yeni, dekan])}
+        self.assertEqual(o, {"PR01": "Docentlik2023_BAP", "HK01": "Atama2019",
+                             "IG01": "Docentlik2023_Dekan Yardımcılığı Görevi"})
+
+    def test_tavan_disi_kanit_istemez(self):
+        a = KanitArsivi(self.kok)
+        hak = [t.Faaliyet("6.3", aves_kod=f"HK{i:02d}") for i in range(1, 8)]   # 7 × 5 = 35 > 20
+        disarida = denetim.tavan_disi(hak, a)
+        self.assertEqual(len(disarida), 3)
+        self.assertEqual(len(denetim.denetle(hak, a)), 4)
