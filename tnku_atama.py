@@ -1,6 +1,6 @@
 """
 TNKÜ Öğretim Üyeliği Kadrosuna Başvuru Puanlama Programı
-Tekirdağ Namık Kemal Üniversitesi - EYS-YNG-129 (28.03.2025)
+Tekirdağ Namık Kemal Üniversitesi - EYS-YNG-129 (Rev. 2, 10.08.2026)
 
 Desteklenen kadro türleri:
   - Dr. Öğretim Üyesi (İlk Atanma ve Yeniden Atama)
@@ -11,6 +11,7 @@ Desteklenen kadro türleri:
 from __future__ import annotations
 import sys
 import io
+import re
 from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Optional
@@ -569,7 +570,7 @@ EK2_PUANLAR: dict[str, dict] = {
     "18.7":  {"ad": "Öğrenci sınıf/kulüp danışmanlığı (yıllık)",
               "taban": 2,  "q_carpan": False, "grup": 18},
     "18.8":  {"ad": "Kongre/sempozyum düzenleme görevi (en fazla 10 puan)",
-              "taban": 2,  "q_carpan": False, "grup": 18},
+              "taban": 2,  "q_carpan": False, "grup": 18, "max_kod": 10},
     "18.9":  {"ad": "Üniversite dışı kurul/komisyon üyeliği (yıllık)",
               "taban": 2,  "q_carpan": False, "grup": 18},
     "18.10": {"ad": "Üniversite bünyesi koordinatörlük/komisyon üyeliği (yıllık)",
@@ -635,8 +636,27 @@ class Faaliyet:
     # ÜAK tanımıyla başlıca yazar (tek yazar ya da danışmanı olduğu öğrenciyle):
     # True → aday başlıca yazar, False → başka bir yazar başlıca, None → belirtilmemiş
     uak_baslica_yazar: Optional[bool] = None
+    # ÜAK kalemini EK-2 kodundan bağımsız belirler (örn. kitap bölümündeki atıf → "5b")
+    uak_kalem: str = ""
+    # EK-2 kalem notları:
+    yuksek_lisans: bool = False   # 17.3 yüksek lisans tez jürisi → yarı puan
+    uluslararasi: bool = False    # 11.10 uluslararası danışmanlık → 2 katı
+    ekip_sayisi: int = 1          # 14.9–14.12 ekibin aldığı ödül → paylaştırılır
+    devam_ediyor: bool = False    # 12.x proje tamamlanmadı → EK-2'de puan almaz (ÜAK 7 sayar)
     # AVES'teki bölüm ve sıra (UM01, UB03 …) – kanıt klasörü adlarıyla aynı
     aves_kod: str = ""
+    # Kanıt klasörüyle eşleştirme için değişmeyen kimlik:
+    # "doi:…", "baslik:…" (başlık+yıl izi) ya da "klasor:<arşivdeki yol>"
+    kimlik: str = ""
+
+
+EKIP_ODUL_KODLARI = frozenset(["14.9", "14.10", "14.11", "14.12"])
+
+
+def kod_sirasi(kod: str) -> tuple:
+    """EK-2 kodlarını doğal sırada dizmek için anahtar ("9.17a" → (9, 17, "a"))."""
+    m = re.match(r"(\d+)\.(\d+)(\w*)", kod)
+    return (int(m.group(1)), int(m.group(2)), m.group(3)) if m else (999, 0, kod)
 
 
 def q_carpan_al(q: Optional[str]) -> float:
@@ -670,13 +690,29 @@ def puan_dokumu(f: Faaliyet) -> dict:
         elif f.patent_durum == "basvuru":
             carpanlar.append(("Başvuru", 0.25))
 
+    # EK-2 12: projeler tamamlanmış olmalıdır
+    if bilgi["grup"] == 12 and f.devam_ediyor:
+        carpanlar.append(("Devam ediyor (EK-2 12: tamamlanmış olmalı)", 0.0))
+
+    # 11.2 yalnızca "kayıtlı patent"tir; başvuru/araştırma raporu için hüküm yoktur
+    if f.kod == "11.2" and f.patent_durum in ("basvuru", "arastirma_raporu"):
+        carpanlar.append(("Tescilsiz (11.2 kayıtlı patent ister)", 0.0))
+
     # İkinci danışman çarpanı (17.1, 17.2)
     if f.kod in ("17.1", "17.2") and f.ikinci_danisман:
         carpanlar.append(("2. danışman", 0.5))
 
-    # Tez jürisi: Yüksek lisansta yarı puan (17.3)
-    # (kullanıcı adet ile girebilir; burada otomatik yarı yapmıyoruz,
-    #  kullanıcı bilinçli girmeli)
+    # Tez jürisi: doktorada tam, yüksek lisansta yarı puan (17.3)
+    if f.kod == "17.3" and f.yuksek_lisans:
+        carpanlar.append(("Yüksek lisans jürisi", 0.5))
+
+    # Uluslararası danışmanlık hizmetleri 2 katı puanlanır (11.10)
+    if f.kod == "11.10" and f.uluslararasi:
+        carpanlar.append(("Uluslararası", 2.0))
+
+    # Ekibin aldığı ödüller paylaştırılır (14.9–14.12) – eşit pay
+    if f.kod in EKIP_ODUL_KODLARI and f.ekip_sayisi > 1:
+        carpanlar.append((f"Ekip ({f.ekip_sayisi} kişi)", 1 / f.ekip_sayisi))
 
     tam_puan = taban
     for _, c in carpanlar:
@@ -726,7 +762,7 @@ class AdayBilgi:
     ad_soyad: str = ""
     alan: str = "ALAN-1"           # "ALAN-1" veya "ALAN-2"
     guzel_sanat: bool = False      # Güzel Sanatlar temel alanı mı?
-    kadro_turu: str = "dr"         # "dr_ilk", "dr_yeniden", "docent", "profesör"
+    kadro_turu: str = "dr_ilk"     # "dr_ilk", "dr_yeniden", "docent", "profesor"
     yeniden_sure: int = 3          # Yeniden atama: 1, 2 veya 3 yıl
     faaliyetler: list[Faaliyet] = field(default_factory=list)
 
@@ -738,7 +774,18 @@ class AdayBilgi:
     ornek_ders_basarili: bool = False
     uak_docent: bool = False
     sifahi_sinav_basarili: bool = False
-    doktora_sonrasi_ders_yari_yil: int = 0  # Doçent/Prof. için ≥4 dönem
+    # Md. 10(3) / 11(7): Doçentte doktora sonrası, Profesörde doçent unvanı sonrası
+    # dönemlik programlarda ≥4 farklı yarıyıl ya da yıllık programlarda ≥2 farklı yıl ders
+    doktora_sonrasi_ders_yari_yil: int = 0
+    ders_yillik_program_yil: int = 0
+    # Md. 10(4): Doçentte yalnızca doktora/uzmanlık/sanatta yeterlilik sonrası faaliyetler
+    doktora_tarihi: Optional[date] = None
+    # Md. 9(2) b/c: Dr. yeniden atamada puan şartı aranmayan durumlar
+    # "" | "saglik" (heyet raporu) | "docent_ilk_uzatim" (doçent unvanı sonrası ilk uzatım)
+    yeniden_puan_muafiyeti: str = ""
+    # EK-1 (d): 1 yıllık yeniden atamada %25 kitap sınırının uygulanmadığı kez sayısı
+    # (bu atama dahil; en fazla 2 kez)
+    bir_yil_atama_sayisi: int = 1
     docent_sonrasi_sure_yil: float = 0.0   # Prof. için ≥2.5 yıl
 
     # Profesörlük tarihleri
@@ -827,6 +874,7 @@ def puan_hesapla(aday: AdayBilgi) -> dict:
     puan1_b_kural_var   = False  # (b): Q1/Q2/Q3'te 1.1, 1./sor./senyör → P1 otomatik
 
     grup_toplamlar: dict[int, float] = {}
+    kod_toplamlar: dict[str, float] = {}
     detaylar = []
 
     for f in aday.faaliyetler:
@@ -837,6 +885,12 @@ def puan_hesapla(aday: AdayBilgi) -> dict:
         bilgi    = EK2_PUANLAR[f.kod]
         grup     = bilgi["grup"]
         max_grup = bilgi.get("max_grup")
+
+        # Kalem bazlı üst sınır (örn. 18.8 en fazla 10 puan)
+        if (max_kod := bilgi.get("max_kod")) is not None:
+            mevcut = kod_toplamlar.get(f.kod, 0.0)
+            p = min(p, max(0.0, max_kod - mevcut))
+            kod_toplamlar[f.kod] = mevcut + p
 
         # Grup bazlı maksimum puan sınırı
         if max_grup is not None:
@@ -896,8 +950,16 @@ def kriter_kontrol(aday: AdayBilgi) -> dict:
     karşılamadığını kontrol eder.
     """
     sonuclar = []
-    puanlar = puan_hesapla(aday)
     uak_sonuc = None   # profesörlükte ÜAK kriter seti seçildiyse doldurulur
+    # Md. 10(4): Doçentte yalnızca doktora sonrası faaliyetler puanlanır
+    doktora_oncesi = []
+    if aday.kadro_turu == "docent" and aday.doktora_tarihi:
+        doktora_oncesi = [f for f in aday.faaliyetler
+                          if f.yayin_tarihi and f.yayin_tarihi < aday.doktora_tarihi]
+        puanlar = puan_hesapla(replace(aday, faaliyetler=[
+            f for f in aday.faaliyetler if f not in doktora_oncesi]))
+    else:
+        puanlar = puan_hesapla(aday)
 
     p1 = puanlar["puan1"]
     p2 = puanlar["puan2"]
@@ -923,6 +985,17 @@ def kriter_kontrol(aday: AdayBilgi) -> dict:
             ekle(f"Yabancı dil (YÖKDİL/YDS) ≥{esik}",
                  aday.yabanci_dil_puani >= esik,
                  f"Girilen puan: {aday.yabanci_dil_puani}")
+
+    def ders_kontrol(baslik: str):
+        """Md. 10(3) / 11(7): ≥4 farklı yarıyıl ya da yıllık programlarda ≥2 farklı yıl."""
+        yy, yil = aday.doktora_sonrasi_ders_yari_yil, aday.ders_yillik_program_yil
+        ekle(f"{baslik} ≥4 farklı yarıyıl ya da yıllık programda ≥2 farklı yıl ders",
+             yy >= 4 or yil >= 2,
+             f"Girilen: {yy} yarıyıl" + (f", {yil} yıl (yıllık program)" if yil else ""))
+
+    if aday.kadro_turu not in ("dr_ilk", "dr_yeniden", "docent", "profesor"):
+        ekle(f"Kadro türü tanımlı olmalı ({aday.kadro_turu!r})", False,
+             "dr_ilk / dr_yeniden / docent / profesor")
 
     if aday.kadro_turu == "dr_ilk":
         # --- Dr. Öğretim Üyesi İlk Atanma ---
@@ -978,35 +1051,53 @@ def kriter_kontrol(aday: AdayBilgi) -> dict:
             puan1_asgarisi, puan2_asgarisi, toplam_asgari = 20, 20, 40
 
         # PUAN-1 = kodlar 1.1–1.6 + 2.1, 2.2, 2.4, 2.5 (puan_hesapla hesapladı)
-        # (d): 2.1/2.2/2.4/2.5'ten gelen PUAN-1 payı, P1 asgari'nin %25'iyle sınırlı
-        p1_kitap_max   = puan1_asgarisi * 0.25
+        # (d): 2.1/2.2/2.4/2.5'ten gelen PUAN-1 payı, P1 asgari'nin %25'iyle sınırlı;
+        # 1 yıllık yeniden atamada (en fazla iki kez) bu sınır uygulanmaz
+        d_muaf = sure == 1 and aday.bir_yil_atama_sayisi <= 2
+        p1_kitap_max   = float("inf") if d_muaf else puan1_asgarisi * 0.25
         p1_kitap_asiri = max(0.0, puanlar["puan1_kitap_yeniden"] - p1_kitap_max)
         p1_efektif     = p1 - p1_kitap_asiri  # (d) fazlası P1'den düşülür
         # (a) PUAN-1 fazlası → PUAN-2
         p1_fazla   = max(0.0, p1_efektif - puan1_asgarisi)
         p2_efektif = p2 + p1_fazla + p1_kitap_asiri  # (d) + (a) fazlası P2'ye
 
+        muafiyet = {
+            "saglik": "Md. 9(2)(b) Heyet raporlu sağlık sorunu – rapor süresi puan şartı "
+                      "aranmaksızın atama süresine eklenir (Üniversite Yönetim Kurulu onayı)",
+            "docent_ilk_uzatim": "Md. 9(2)(c) ÜAK doçent unvanı sonrası ilk süre uzatımı "
+                                 "(3 yıl) – puan şartı aranmaz",
+        }.get(aday.yeniden_puan_muafiyeti)
+        uzatim_3 = aday.yeniden_puan_muafiyeti != "docent_ilk_uzatim" or sure == 3
+        if muafiyet:
+            ekle(muafiyet, uzatim_3, "" if uzatim_3 else "Bu uzatım 3 yıllık yapılır")
         # (b): Q1/Q2/Q3, 1./sor./senyör yazar → PUAN-1 otomatik sağlanır
-        if puanlar["puan1_b_kural_var"]:
+        if muafiyet:
+            pass
+        elif puanlar["puan1_b_kural_var"]:
             ekle("(b) PUAN-1 otomatik sağlandı (Q1/Q2/Q3, 1./sor./senyör yazar)",
                  True,
                  "Bir adet Q1/Q2/Q3 yayınıyla PUAN-1 koşulu karşılandı")
         else:
             p1_not = f"PUAN-1: {p1}"
+            if d_muaf and puanlar["puan1_kitap_yeniden"]:
+                p1_not += "  [(d) %25 sınırı 1 yıllık atamada uygulanmadı]"
             if p1_kitap_asiri > 0:
                 p1_not += (f"  [(d) 2.1/2.2/2.4/2.5 fazlası "
                            f"{round(p1_kitap_asiri, 2)} puan P2'ye aktarıldı]")
             ekle(f"PUAN-1 ≥{puan1_asgarisi} (EK-2: 1.1–1.6, 2.1/2.2/2.4/2.5; (d) %25 üst sınır)",
                  p1_efektif >= puan1_asgarisi,
                  p1_not)
-        ekle(f"PUAN-2 ≥{puan2_asgarisi} (EK-2 tamamı, P1 fazlası dahil)",
-             p2_efektif >= puan2_asgarisi,
-             f"PUAN-2 + P1 fazlası: {round(p2_efektif, 2)}")
-        ekle(f"Toplam ≥{toplam_asgari}",
-             toplam >= toplam_asgari,
-             f"Toplam: {toplam}")
+        if not muafiyet:
+            ekle(f"PUAN-2 ≥{puan2_asgarisi} (EK-2 tamamı, P1 fazlası dahil)",
+                 p2_efektif >= puan2_asgarisi,
+                 f"PUAN-2 + P1 fazlası: {round(p2_efektif, 2)}")
+            ekle(f"Toplam ≥{toplam_asgari}",
+                 toplam >= toplam_asgari,
+                 f"Toplam: {toplam}")
 
-        if sure == 1:
+        if muafiyet:
+            pass
+        elif sure == 1:
             ekle("(f) Bilgi: 1 yıllık süre – bu dönem puanları sonraki süre "
                  "belirlemesinde önceki puanlarla birleştirilir",
                  True,
@@ -1025,16 +1116,22 @@ def kriter_kontrol(aday: AdayBilgi) -> dict:
 
         yabanci_dil_kontrol(65)
 
-        ekle("Doktora sonrası ≥4 farklı yarıyıl ders",
-             aday.doktora_sonrasi_ders_yari_yil >= 4,
-             f"Girilen: {aday.doktora_sonrasi_ders_yari_yil} yarıyıl")
+        ders_kontrol("Md. 10(3) Doktora sonrası")
+        if aday.doktora_tarihi:
+            ekle("Md. 10(4) Yalnızca doktora sonrası faaliyetler puanlandı", True,
+                 f"Doktora: {aday.doktora_tarihi:%d.%m.%Y}; hariç tutulan: {len(doktora_oncesi)}"
+                 " faaliyet (tarihi girilmemiş faaliyetler dahil edildi)")
+        else:
+            ekle("Md. 10(4) Yalnızca doktora sonrası faaliyetler puanlanır", True,
+                 "Doktora tarihi girilmediği için tüm faaliyetler sayıldı; doktora öncesi "
+                 "faaliyetleri listeden çıkarın")
 
         puan1_asgarisi = 25
         puan2_asgarisi = 300
         toplam_asgari = 325
 
         if aday.guzel_sanat:
-            puan1_asgarisi = int(25 * 0.5)  # %50'si yeterli
+            puan1_asgarisi = 25 * 0.5  # (i) %50'si yeterli
 
         # PUAN-1 = kodlar 1.1–1.6 (puan_hesapla hesapladı)
         # (a) PUAN-1 fazlası → PUAN-2
@@ -1095,9 +1192,7 @@ def kriter_kontrol(aday: AdayBilgi) -> dict:
                  aday.uak_kriterleri_yeniden_saglandi,
                  "" if aday.uak_kriterleri_yeniden_saglandi else "Beyan işaretlenmemiş")
 
-        ekle("Doçent sonrası ≥4 farklı yarıyıl ders",
-             aday.doktora_sonrasi_ders_yari_yil >= 4,
-             f"Girilen: {aday.doktora_sonrasi_ders_yari_yil} yarıyıl")
+        ders_kontrol("Md. 11(7) Doçent unvanı sonrası")
 
         ekle("Doçent sonrası en az 2.5 yıl yükseköğretim kurumunda",
              aday.docent_sonrasi_sure_yil >= 2.5,
@@ -1271,9 +1366,7 @@ def faaliyet_ekle_interaktif(kadro_turu: str = "") -> list[Faaliyet]:
         temizle()
         print(f"[{gruplar[secim]}] – Faaliyet Seçimi")
         print("─" * 40)
-        kodlar = sorted(ilgili.keys(),
-                        key=lambda x: [int(p) if p.isdigit() else p
-                                        for p in x.replace(".", " ").split()])
+        kodlar = sorted(ilgili.keys(), key=kod_sirasi)
         for k in kodlar:
             v = ilgili[k]
             print(f"  {k:>6}  {v['taban']:>4} puan  {v['ad']}")
@@ -1375,7 +1468,7 @@ def rapor_yazdir(aday: AdayBilgi):
 
     print("=" * 70)
     print("TNKÜ ÖĞRETİM ÜYELİĞİ ATAMA PUANLAMA RAPORU")
-    print("EYS-YNG-129 | 28.03.2025")
+    print("EYS-YNG-129 | Rev. 2 · 10.08.2026")
     print("=" * 70)
     print(f"Aday         : {aday.ad_soyad}")
     print(f"Alan         : {aday.alan}" + (" (Güzel Sanatlar)" if aday.guzel_sanat else ""))
@@ -1411,7 +1504,7 @@ def rapor_yazdir(aday: AdayBilgi):
 def ana_menu():
     print("=" * 70)
     print("TNKÜ ÖĞRETİM ÜYELİĞİ ATAMA PUANLAMA PROGRAMI")
-    print("Tekirdağ Namık Kemal Üniversitesi – EYS-YNG-129 (28.03.2025)")
+    print("Tekirdağ Namık Kemal Üniversitesi – EYS-YNG-129 (Rev. 2, 10.08.2026)")
     print("=" * 70)
 
     aday = AdayBilgi()
@@ -1463,7 +1556,7 @@ def ana_menu():
     elif aday.kadro_turu == "docent":
         aday.uak_docent = evet_hayir("ÜAK Doçent unvanı var mı?")
         aday.sifahi_sinav_basarili = evet_hayir(
-            "Sözlü sınav başarılı mı (veya muafiyetli)?")
+            "Sözlü sınav başarılı mı?")
         dil_bilgileri_al()
         aday.doktora_sonrasi_ders_yari_yil = int(
             sayi_al("Doktora sonrası farklı yarıyıl ders sayısı (≥4 gerekli)",

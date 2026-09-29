@@ -29,6 +29,45 @@ Akademik kadro başvurularında (Doktor Öğretim Üyesi, Doçent, Profesör) ad
 
 ---
 
+## 🗂️ Kanıt Arşivi ve Başvuru Dosyası (yalnızca yerelde)
+Program kendi bilgisayarınızda çalıştırıldığında faaliyetlerin kanıt klasörleriyle bütünleşir. Kanıt klasörü bulunamazsa (örn. Streamlit Cloud) bu bölümler görünmez ve program eskisi gibi çalışır. Kanıt dosyaları ve kişisel bilgiler hiçbir zaman buluta ya da repoya gönderilmez.
+
+**Kanıt klasörü düzeni** (örn. `E:\Kanit_Dosyalari`):
+```text
+UM22_2021_<kısa başlık>\      kayit.json, kunye.txt, tam_metin.pdf, arsiv\, atiflar\
+UB03_2025_<kısa başlık>\      bildiri_sayfalari.pdf, bildiri_kitabi_kapak_kunye.pdf, ...
+DERS_Verilen_Dersler\ PROJE_TUBITAK\ HAKEM_Hakemlikler\ IDARI_Gorevler\ ...
+_Genel_Belgeler\ _Docentlik_Basvuru_Belgeleri\ ...   (yardımcı klasörler)
+aday.json                     aday bilgileri ve faaliyet listesi (Kaydet / Yükle)
+_eslestirme_kurallari.json    bu arşive özgü eşleştirme kuralları (isteğe bağlı)
+```
+
+**Programda:**
+1. *Aday Bilgileri → Kanıt klasörü:* klasörü seçin; **Kaydet / Yükle** ile faaliyet listesi kalıcı olur (program açılışta kayıtlı listeyi yükler).
+2. *AVES'ten yükleme sonrası:* kanıt klasörü olmayan yayınlar için klasör açılabilir; AVES'teki sıra değişmişse klasörler yeni kodlarla yeniden adlandırılır (eşleştirme DOI / başlık kimliğiyle yapılır).
+3. *Faaliyetler → Kanıt klasöründen doldur:* yayın tarihleri (Crossref / AVES), `atiflar\` klasörlerinden kanıtlı atıf sayımı (endeks ve doçentlik başvurusu öncesi/sonrası ayrımıyla), ders dönemleri (EK-2 17.4 ve Md. 11(7)), klasörden faaliyet ekleme.
+4. *Faaliyet tablosu:* her faaliyetin kanıt durumu; düzenleme panelinde klasörü / tam metni açma ve klasörü elle bağlama.
+5. *Sonuç ekranı:* **Kanıt denetimi** (puan alan faaliyetlerde eksik belgeler, Md. 7) ve **Başvuru dosyası**: EK-2 sırasıyla USB klasörü + kapaklı, içindekilerli, yer imli birleşik PDF (atıf yapan yayınlardan yalnızca ilk sayfa ve atıf sayfası; taranmış belgeler hafifletilir, USB'deki dosyalar özgün kalır).
+
+**Komut satırı:**
+```bash
+python -m kanit durum                       # arşivin özeti ve eksik kanıtlar
+python -m kanit ozet                        # kunye.txt kontrol listeleri + Excel özeti
+python -m kanit kimlik-yaz                  # eski klasörlere kayit.json yazar
+python -m kanit arsivden-ekle --kaynak Tesvik2024="G:\Akademik Teşvik\Akademik Teşvik 2024" [--kopyala]
+```
+**Web of Science atıfları:** WoS'ta yayınlarınız → *Create Citation Report* → *Citing articles* (*Without self-citations*) → sol panelde *Web of Science Index*: SCI-EXPANDED, SSCI, A&HCI (EK-2 5.1), ESCI (5.2), Book Citation Index (5.7, uluslararası kitapta atıf) → *Export* → *Tab delimited file*, *Record content: Full Record and Cited References*. Dosyayı programda *Kanıt klasöründen doldur → 2b* ile yükleyin ya da:
+```bash
+python -m kanit wos-atif savedrecs.txt --soyad Saygılı            # plan
+python -m kanit wos-atif savedrecs.txt --soyad Saygılı --uygula   # klasörleri oluştur
+python -m kanit wos-atif savedrecs.txt --soyad Saygılı --esci --uygula   # + ESCI ve BKCI
+```
+Her atıf yapan yayın, kaynakçasından bulunan yayınınızın `atiflar\WoS_<yıl>_<yazar>_<başlık> (SCI-E)\` klasörüne; WoS kaydından üretilen `endeks_bilgisi.pdf` ve (açık erişimliyse) tam metniyle konur. Kaynakçadaki DOI, yıl + cilt + sayfa ya da (bildirilerde) yazar + yıl + kısaltılmış kaynak adıyla eşleştirme yapılır. Öz atıflar ve arşivde zaten bulunan atıflar atlanır; ücretli tam metinler `_indirilecek_atiflar.xlsx` listesinde toplanır.
+
+`arsivden-ekle`, eski teşvik / doçentlik / atama klasörlerindeki belgeleri faaliyet klasörlerine eşler; `--kopyala` verilmezse yalnızca plan çıkarır. Aynı içerik ikinci kez eklenmez; kaynak klasörlere dokunulmaz.
+
+---
+
 ## 🔢 AVES Kodları
 AVES'ten aktarılan her faaliyet, AVES'teki bölümünü ve sırasını gösteren bir kod alır. Bu kod faaliyet tablosunda (**AVES** sütunu) ve PDF raporunda (**#** sütunu) görünür; kanıt klasörleri de aynı kodlarla adlandırılabilir.
 
@@ -64,9 +103,13 @@ python -m unittest discover -s tests -v
 
 ## 📂 Dosya Yapısı
 ```text
-├── src/                # Kaynak kodlar
-├── data/               # Atama kriterleri ve katsayı tabloları
-├── docs/               # EYS-YNG-129 yönergesi ve dokümanlar
+├── tnku_atama.py       # Puanlama motoru (EK-1, EK-2, kriter kontrolü)
+├── tnku_streamlit.py   # Web arayüzü
+├── kanit/              # Kanıt arşivi ve başvuru dosyası (yerel)
+├── kanit_arayuz.py     # Arayüzün kanıt bölümleri
+├── uak_kriterleri/     # ÜAK doçentlik kriter setleri
+├── aves_yardimci.py    # AVES aktarım yardımcıları
+├── tests/              # Testler
 └── README.md           # Proje tanıtım dosyası
 ```
 
@@ -78,4 +121,4 @@ Eğer bir hata fark ederseniz veya güncel yönerge değişikliklerini sisteme y
 
 ---
 **Geliştirici:** Ahmet SAYGILI
-**Son Güncelleme:** 16.04.2026
+**Son Güncelleme:** 28.09.2026 (EYS-YNG-129 Rev. 2, 10.08.2026)

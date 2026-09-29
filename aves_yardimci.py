@@ -32,17 +32,179 @@ def aves_kodu(kat_key: str, sira: int) -> str:
     return f"{onek}{sira:02d}" if onek else ""
 
 
-def kitap_ek2_kodu(kat_key: str, metin: str) -> str:
-    """Kitap kaydının EK-2 kodu.
+def kitap_ek2_kodu(kat_key: str, metin: str, tip: str = "") -> str:
+    """Kitap kaydının EK-2 kodu (AVES türü "tip" varsa ona göre).
 
     Bölüm: uluslararası → 2.5, ulusal → 2.6 (BKCI kapsamındaysa kullanıcı 2.4'e
     çevirebilir). Kitap: uluslararası → 2.2, ulusal → 2.3.
+    Kitap Tercümesi → 2.9–2.12, Ansiklopedi Maddesi → 3.9/3.10,
+    Ders Kitabı → 2.7 (yabancı üniversite) / 2.8 (ulusal üniversite).
     """
     bolum = "bolum" in kat_key or bool(re.search(r"Bölüm\s*:", metin))
     uluslararasi = "ulusl" in kat_key
+    t = _norm(tip)
+    if "tercume" in t or "ceviri" in t:
+        if bolum:
+            return "2.10" if uluslararasi else "2.12"
+        return "2.9" if uluslararasi else "2.11"
+    if "ansiklopedi" in t:
+        return "3.9" if uluslararasi else "3.10"
+    if "ders kitabi" in t and not bolum:
+        return "2.7" if uluslararasi else "2.8"
     if bolum:
         return "2.5" if uluslararasi else "2.6"
     return "2.2" if uluslararasi else "2.3"
+
+
+# EK-2 1.2 / 1.9 / 1.11 kapsamındaki (araştırma makalesi olmayan) türler.
+# Dergi adlarındaki "Review" (örn. Physical Review) yanlış eşleşmesin diye yalın "review" aranmaz.
+DERLEME_IPUCU = ("derleme", "review article", "(review)", "[review]")
+NOT_IPUCU = ("teknik not", "technical note", "editöre mektup", "editore mektup", "letter to the editor",
+             "vaka takdimi", "olgu sunumu", "case report", "kitap eleştirisi", "book review",
+             "araştırma notu", "research note", "çeviri makale")
+
+
+# AVES makale türleri (label-warning): araştırma makalesi olanlar ve derleme
+AVES_ARASTIRMA = ("ozgun makale", "kisa makale")
+AVES_DERLEME = ("derleme",)
+
+
+def makale_ek2_kodu(endeksler: list, metin: str = "", ulusal: bool = False,
+                    tip: str = "") -> str:
+    """AVES makale kaydının EK-2 kodu (1.1–1.11): endekse ve makale türüne göre.
+
+    tip: AVES türü (Özgün Makale, Derleme Makale, Vaka Takdimi, Editöre Mektup, Teknik Not,
+    Kitap Kritiği, Araştırma Notu, Özet …). Yoksa künye metnindeki ipuçlarına bakılır.
+    AVES endeks etiketleri: SCI / SCI-Expanded / SSCI / AHCI → 1.1–1.3;
+    ESCI, Scopus, "Alan Endeksleri" (ÜAK tanımlı) → 1.4; TR DİZİN → 1.6;
+    diğer endeksler → 1.5; "Endekste Taranmıyor" → 1.7 (ulusal dergide: 1.8).
+    """
+    etiketler = [e.upper() for e in (endeksler or [])]
+    eks = " ".join(etiketler)
+    t = _norm(tip)
+    if t:
+        derleme = any(k in t for k in AVES_DERLEME)
+        not_ = not derleme and not any(k in t for k in AVES_ARASTIRMA)
+    else:
+        m = (metin or "").lower()
+        derleme = any(k in m for k in DERLEME_IPUCU)
+        not_ = any(k in m for k in NOT_IPUCU)
+    diger = derleme or not_                     # araştırma makalesi değil
+    trdizin = "TRDIZIN" in eks or "TR DİZİN" in eks or "TR DIZIN" in eks
+    if re.search(r"(?<![A-Z])(SCI|SCI-EXPANDED|SCI-E|SSCI|AHCI|A&HCI)(?![A-Z])", eks):
+        return "1.3" if derleme else "1.2" if not_ else "1.1"
+    if "ESCI" in eks or "SCOPUS" in eks or "ALAN ENDEKS" in eks:
+        return "1.9" if diger else "1.4"
+    if trdizin:
+        return "1.9" if diger else "1.6"
+    if ulusal:
+        return "1.11" if diger else "1.8"
+    if any(e and "TARANMIYOR" not in e for e in etiketler):
+        return "1.9" if diger else "1.5"          # diğer uluslararası endeksli
+    return "1.11" if diger else "1.7"
+
+
+def hakemlik_ek2(endeksler: list, metin: str, tip: str = "") -> tuple[str, int, int | None]:
+    """AVES hakemlik kaydı → (EK-2 kodu, hakemlik sayısı, yıl).
+
+    Dergi: SCI/SSCI/AHCI → 6.3; ESCI/Scopus/alan endeksleri → 6.4; TR Dizin → 6.8;
+    diğer endeksler → 6.5; endekste taranmayan → 6.6. Kitap → 6.1 (uluslararası ayrımı
+    AVES'te yok; ulusal kitapsa kullanıcı 6.2'ye çevirmeli)."""
+    eks = " ".join(e.upper() for e in (endeksler or []))
+    sayi = re.search(r"Hakemlik Sayısı\s*:\s*(\d+)", metin or "", re.I)
+    yil = re.findall(r"\b((?:19|20)\d{2})\b", metin or "")
+    adet, yil = (int(sayi.group(1)) if sayi else 1), (int(yil[-1]) if yil else None)
+    if "kitap" in _norm(tip):
+        return "6.1", adet, yil
+    if re.search(r"(?<![A-Z])(SCI|SCI-EXPANDED|SCI-E|SSCI|AHCI|A&HCI)(?![A-Z])", eks):
+        return "6.3", adet, yil
+    if "ESCI" in eks or "SCOPUS" in eks or "ALAN ENDEKS" in eks:
+        return "6.4", adet, yil
+    if "TR DİZİN" in eks or "TRDIZIN" in eks or "TR DIZIN" in eks:
+        return "6.8", adet, yil
+    if eks and "TARANMIYOR" not in eks:
+        return "6.5", adet, yil
+    return "6.6", adet, yil
+
+
+def _tarih(g: str):
+    from datetime import date
+    g, a, y = (int(x) for x in g.split("."))
+    return date(y, a, g)
+
+
+def proje_ek2(metin: str, bugun=None) -> tuple[str, object, object, bool]:
+    """AVES proje kaydı → (EK-2 kodu, başlangıç, bitiş, devam ediyor mu).
+
+    EK-2 12: projeler "tamamlanmış olmalıdır"; bitişi gelmemiş ya da "Devam Ediyor"
+    projeler devam ediyor sayılır (EK-2'de puan almaz, ÜAK 7'de sayılır)."""
+    from datetime import date
+    bugun = bugun or date.today()
+    m = (metin or "").lower()
+    yurutucu = any(x in m for x in ("yürütücü", "koordinatör", "pi "))
+    if "tübitak" in m or "tubitak" in m:
+        kod = "12.5" if yurutucu else "12.6"
+    elif any(x in m for x in ("h2020", "horizon", "fp7", "avrupa birliği", "ab destekli",
+                              "erasmus", "ipa ")):
+        kod = "12.1" if yurutucu else "12.2"
+    elif "bap" in m or "bilimsel araştırma projeleri" in m or \
+            "yükseköğretim kurumları tarafından destekli" in m:
+        kod = "12.11" if yurutucu else "12.12"
+    elif "sanayi" in m or "teknoloji geliştirme" in m or "tgb" in m:
+        kod = "12.7" if yurutucu else "12.8"
+    elif "uluslararası" in m:
+        kod = "12.9" if yurutucu else "12.10"
+    else:
+        kod = "12.13" if yurutucu else "12.14"
+    tarihler = [_tarih(x) for x in re.findall(r"\b(\d{2}\.\d{2}\.\d{4})\b", metin or "")]
+    bas = tarihler[0] if tarihler else None
+    bit = tarihler[1] if len(tarihler) > 1 else None
+    devam = "devam" in m or bit is None or bit > bugun
+    return kod, bas, bit, devam
+
+
+IDARI_KODLARI = [          # (anahtar ifadeler, EK-2 kodu) – ilk eşleşen
+    (("rektör yardımcı", "rektör yard"), "18.1"), (("rektör",), "18.1"),
+    (("dekan yardımcı", "dekan yard", "müdür yardımcı", "müdür yard", "senato"), "18.3"),
+    (("merkez müdür",), "18.3"),
+    (("dekan", "başhekim", "enstitü müdür", "yüksekokul müdür", "konservatuvar müdür",
+      "meslek yüksekokulu müdür"), "18.2"),
+    (("bölüm başkan yardımcı", "bölüm başkan yard", "anabilim dalı başkan", "ana bilim dalı başkan",
+      "koordinatör"), "18.5"),
+    (("bölüm başkan",), "18.4"),
+    (("danışman",), "18.7"),
+    # Kurul / komisyon üyelikleri: üniversite bünyesinde 18.10 (18.5 de okunabilir – temkinli)
+    (("kurul", "komisyon"), "18.10"),
+]
+
+
+def idari_ek2(unvan: str, tarih: str, bugun_yil: int | None = None) -> tuple[str, int] | None:
+    """AVES idari görev ("Dekan Yardımcısı", "2019-2024" / "2019-") → (EK-2 kodu, yıl sayısı)."""
+    from datetime import date
+    u = (unvan or "").lower()
+    kod = next((k for ifadeler, k in IDARI_KODLARI if any(i in u for i in ifadeler)), None)
+    yillar = [int(y) for y in re.findall(r"(?:19|20)\d{2}", tarih or "")]
+    if kod is None or not yillar:
+        return None
+    bitis = yillar[1] if len(yillar) > 1 else (bugun_yil or date.today().year)
+    return kod, max(0, bitis - yillar[0])
+
+
+def bildiri_ek2_kodu(tip: str, metin: str, uluslararasi: bool) -> str:
+    """AVES bildiri kaydının EK-2 kodu (AVES türü: Tam metin bildiri, Özet bildiri, Poster,
+    Sözlü Bildiri, Davetli konuşmacı). Tam metni belirtilmeyen sözlü bildiri temkinli olarak
+    özet sayılır; uluslararası davetli konuşma 3.1'de CPCI şartı aradığı için 3.2'ye gider."""
+    t = _norm(tip) or _norm(metin)
+    if "poster" in t:
+        return "3.4" if uluslararasi else "3.8"
+    if "davetli" in t:
+        return "3.2" if uluslararasi else "3.5"
+    if "tam metin" in t:
+        return "3.2" if uluslararasi else "3.6"
+    if "ozet" in t or "abstract" in t or "sozlu" in t:
+        return "3.3" if uluslararasi else "3.7"
+    return "3.2" if uluslararasi else "3.6"
+
 
 
 def _norm(t: str) -> str:

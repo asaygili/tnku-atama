@@ -83,7 +83,9 @@ MUHENDISLIK = kaydet(KriterSeti(
                   ikinci_danisman_yarim=True),
             Kalem("6b", "Yüksek lisans tez danışmanlığı", 2, ("17.2",), tez=None,
                   ikinci_danisman_yarim=True),
-        ), max_puan=10),
+        ), max_puan=10,
+            elle_kontrol=("Yalnızca tamamlanan lisansüstü tezlerin danışmanlığı puanlanır; "
+                          "devam eden tezleri çıkarın",)),
         Bolum(7, "Bilimsel Araştırma Projesi", (
             Kalem("7a", "AB Çerçeve programı koordinatör / baş araştırmacı", 15,
                   ("12.1",), tez=None),
@@ -93,7 +95,10 @@ MUHENDISLIK = kaydet(KriterSeti(
                   ("12.9", "12.10"), tez=None),
             Kalem("7d", "Üniversite dışı kamu kurumu projesinde görev", 4,
                   ("12.3", "12.4", "12.5", "12.6", "12.13", "12.14"), tez=None),
-        ), max_puan=20),
+        ), max_puan=20,
+            elle_kontrol=("7a/7b yalnızca AB Çerçeve Programı (FP7, Horizon 2020, Horizon Europe) "
+                          "projeleridir; Erasmus+, IPA vb. AB destekli projeler 7c'dir",
+                          "7d yalnızca üniversite dışındaki kamu kurumlarıyla yapılan projelerdir")),
         Bolum(8, "Bilimsel Toplantı Faaliyeti", (
             Kalem("8a", "Uluslararası toplantıda bildiri (poster hariç)", 3,
                   ("3.1", "3.2", "3.3"), yazar_dagilimi="esit"),
@@ -102,9 +107,9 @@ MUHENDISLIK = kaydet(KriterSeti(
         ), min_puan=5, max_puan=10,
             elle_kontrol=("Aynı toplantıda sunulan en fazla bir bildiri puanlanır",)),
         Bolum(9, "Eğitim-Öğretim Faaliyeti", (
+            # 9a'ya yalnızca "lisansüstü ders" olarak işaretlenen 17.4 satırları gider
+            Kalem("9a", "Bir dönem yüksek lisans / doktora dersi", 3, (), tez=None),
             Kalem("9b", "Bir dönem önlisans / lisans dersi", 2, ("17.4",), tez=None),
-        ), min_puan=2, max_puan=4, iki_yil_egitim_puani=2,
-            elle_kontrol=("Lisansüstü dersler dönem başına 3 puandır (9a); "
-                          "program tüm dersleri 9b olarak sayar",)),
+        ), min_puan=2, max_puan=4, iki_yil_egitim_puani=2),
     ),
 ))

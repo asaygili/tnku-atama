@@ -151,8 +151,13 @@ def _baslica_mi(f) -> Optional[bool]:
 def kalem_bul(kset: KriterSeti, f) -> Optional[tuple[Bolum, Kalem]]:
     """Faaliyetin eşlendiği (bölüm, kalem) çiftini döndürür; yoksa None."""
     tezden = bool(getattr(f, "tezden_uretilmis", False))
+    zorunlu = getattr(f, "uak_kalem", "")
     for b in kset.bolumler:
         for k in b.kalemler:
+            if zorunlu:
+                if k.kod == zorunlu:
+                    return b, k
+                continue
             if f.kod not in k.ek2_kodlari:
                 continue
             if k.tez is not None and k.tez != tezden:
