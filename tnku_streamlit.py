@@ -607,7 +607,7 @@ try:
                 if kod in ("12.1", "12.2") and not any(
                         x in m for x in ("h2020", "horizon", "fp7", "çerçeve", "framework")):
                     f_obj5.uak_kalem = "7c"
-                f_obj5._kunye = m[:300]
+                f_obj5._kunye = o.get("metin", "")[:300]
                 ekle(f_obj5)
 
         # 6. Hakemlik (grup tavanı 20)
@@ -1145,6 +1145,27 @@ def _kaydet_font(isim: str, dosya: str) -> bool:
         return False
 
 
+def _faaliyet_etiketi(f, uzunluk: int = 70) -> tuple[str, str]:
+    """(AVES kodu, kısa ad) – raporlarda faaliyetin hangi yayın/kanıt klasörü olduğu.
+    Atıf satırları için 'Atıflar (doçentlik başvurusu sonrası)' gibi bir açıklama döner."""
+    kimlik = getattr(f, "kimlik", "") or ""
+    if kimlik.startswith("atif:"):
+        from kanit.atif import kimlik_coz
+        _, zaman, bolum = kimlik_coz(kimlik)
+        return "ATIF", (f"{f.adet} atıf (doçentlik başvurusu {zaman})"
+                        + (" – kitap bölümlerinde" if bolum else ""))
+    kod = getattr(f, "aves_kod", "") or ""
+    kunye = getattr(f, "_kunye", "") or ""
+    ad = ay.baslik_cikar(kunye) if kunye else ""
+    a = ka.arsiv()
+    if a is not None and (kay := a.bul(f)) is not None:
+        ad = ad or (ay.baslik_cikar(kay.kunye) if kay.kunye else "") or kay.klasor.name
+        kod = kod or kay.aves_kod or ""
+    ad = ad or kunye or t.EK2_PUANLAR.get(f.kod, {}).get("ad", "")
+    ad = " ".join(ad.split())
+    return kod or "—", (ad[:uzunluk - 1] + "…") if len(ad) > uzunluk else ad
+
+
 def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
     from xml.sax.saxutils import escape as _xml_escape
     buf = io.BytesIO()
@@ -1315,14 +1336,20 @@ def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
         ut.setStyle(uts)
         elems.append(ut)
         elems.append(Spacer(1, 6))
-        sdata = [["ÜAK", "Kalem", "EK-2", "Birim", "Yazar Payı", "Adet", "Puan"]]
-        for s in uak_s["satirlar"]:
-            sdata.append([s["kalem"], Paragraph(_xml_escape(s["kalem_ad"]), s_kc),
+        sdata = [["ÜAK", "Yayın / kanıt klasörü", "Kalem", "EK-2", "Birim", "Pay", "Adet",
+                  "Puan"]]
+        for s in sorted(uak_s["satirlar"], key=lambda s: (s["kalem"],
+                                                           _faaliyet_etiketi(s["faaliyet"])[0])):
+            yk, yad = _faaliyet_etiketi(s["faaliyet"], 80)
+            sdata.append([s["kalem"],
+                          Paragraph(f"<b>{_xml_escape(yk)}</b> {_xml_escape(yad)}", s_kc),
+                          Paragraph(_xml_escape(s["kalem_ad"]), s_kc),
                           s["faaliyet"].kod, f"{s['kalem_puan']:g}",
                           f"%{s['pay'] * 100:.4g}", str(s["adet"]), f"{s['puan']:g}"])
         if len(sdata) > 1:
             st_ = Table(sdata, repeatRows=1,
-                        colWidths=[1.2*cm, 8.2*cm, 1.4*cm, 1.4*cm, 2*cm, 1.4*cm, 1.8*cm])
+                        colWidths=[1.0*cm, 6.4*cm, 4.0*cm, 1.1*cm, 1.1*cm, 1.4*cm, 1.0*cm,
+                                   1.4*cm])
             st_.setStyle(tbl_style())
             elems.append(st_)
         elle = [n for b in uak_s["bolumler"] for n in b["elle_kontrol"]]
@@ -2460,13 +2487,17 @@ if sonuc is not None and son_aday is not None:
                          f"{len(uak_s['eslesmeyen'])} eşleşmeyen)"):
             st.dataframe(pd.DataFrame([{
                 "ÜAK":      s["kalem"],
+                "AVES":     _faaliyet_etiketi(s["faaliyet"])[0],
+                "Yayın / kanıt klasörü": _faaliyet_etiketi(s["faaliyet"])[1],
                 "Kalem":    s["kalem_ad"],
                 "EK-2":     s["faaliyet"].kod,
                 "Birim":    s["kalem_puan"],
                 "Yazar Payı": round(s["pay"], 3),
                 "Adet":     s["adet"],
                 "Puan":     s["puan"],
-            } for s in uak_s["satirlar"]]), use_container_width=True, hide_index=True)
+            } for s in sorted(uak_s["satirlar"],
+                              key=lambda s: (s["kalem"], _faaliyet_etiketi(s["faaliyet"])[0]))]),
+                use_container_width=True, hide_index=True)
             if uak_s["eslesmeyen"]:
                 st.caption("ÜAK tablosunda karşılığı olmayan faaliyetler: " +
                            ", ".join(sorted({f.kod for f in uak_s["eslesmeyen"]})))
