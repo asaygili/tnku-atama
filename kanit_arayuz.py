@@ -315,8 +315,16 @@ def _atif_bolumu(a: KanitArsivi):
             value=True, key="kt_scholar",
             help="AVES aktarımı Scholar atıf sayısını tek bir 5.1 satırı olarak ekler; "
                  "kanıtlı sayım onun yerine geçer.")
+    esci_haric = st.checkbox(
+        "ESCI (5.2) atıflarını sayma", value="5.2" in ayar.atif_haric(), key="kt_esci_haric",
+        help="İşaretliyse ESCI dergilerindeki atıflar puana ve başvuru dosyasına girmez (örn. WoS "
+             "ekran görüntüsünü yalnızca SCI/SCI-E atıfları için aldıysanız). Seçim kaydedilir ve "
+             "⚡ Yükle ve Ekle'de de kullanılır.")
+    if esci_haric != ("5.2" in ayar.atif_haric()):
+        ayar.atif_haric_kaydet((set(ayar.atif_haric()) - {"5.2"}) | ({"5.2"} if esci_haric else set()))
     if st.button("Faaliyet listesine uygula", key="kt_atif_uygula", type="primary", help='Sayılan atıfları EK-2 5.x satırları olarak faaliyet listesine ekler (önceki atıf satırlarının yerine geçer).'):
-        yeni = ka_atif.faaliyetler(atiflar, basvuru, belirsiz_kod or None, t.Faaliyet)
+        yeni = ka_atif.faaliyetler(atiflar, basvuru, belirsiz_kod or None, t.Faaliyet,
+                                   haric=ayar.atif_haric())
         kalan = [f for f in st.session_state.faaliyetler
                  if not f.kimlik.startswith("atif:")
                  and not (scholar_kaldir and f.kod in ("5.1", "5.9")
@@ -567,11 +575,11 @@ def paket_bolumu(aday, sonuc, a: KanitArsivi | None, rapor_pdf) -> None:
                "(Md. 6(1): fiziksel dosya + USB). Kaynak klasörlere dokunulmaz.")
     s1, s2 = st.columns(2)
     with s1:
-        atif_k = st.checkbox("Atıf kanıtlarını ekle", value=True, key="pk_atif", help='Atıf yapan yayınların ilk sayfası ve atıf sayfası dosyaya eklenir.')
-        atif_tam = st.checkbox("Yalnızca tam metni olan atıfları ekle", value=False, key="pk_atif_tam",
-                               help="Tam metni olan atıflar her durumda önce gelir. İşaretlenirse "
-                                    "yalnızca WoS kaydıyla belgelenen atıflar dosyaya girmez "
-                                    "(puanda sayılmaya devam eder; kalemde not düşülür).")
+        atif_k = st.checkbox(
+            "Atıf belgelerini ekle", value=True, key="pk_atif",
+            help="Atıflar klasörüne her yayının WoS ekran görüntüsü (yayın klasöründeki wos_atif.pdf) "
+                 "ve programın hazırladığı atıf listesi (tarih, doçentlik başvurusu öncesi/sonrası) "
+                 "konur; atıf yapan yayınlar her yayının kendi 'atiflar' alt klasöründe kalır.")
         oncesi = st.checkbox("Doçentlik başvurusu öncesi faaliyetleri de ekle", value=True,
                              key="pk_oncesi", help='Kapalıysa yalnızca doçentlik başvurusu sonrası faaliyetlerin kanıtları dosyaya girer.')
     with s2:
@@ -590,7 +598,6 @@ def paket_bolumu(aday, sonuc, a: KanitArsivi | None, rapor_pdf) -> None:
                           key="pk_cikti", help='Başvuru dosyasının (USB klasörü ve birleşik PDF) kaydedileceği yer.')
     if st.button("📦 Başvuru dosyasını hazırla", type="primary", key="pk_hazirla", help="Puan alan faaliyetleri kanıtlarıyla birlikte EK-2 sırasına dizer; USB'ye kopyalanacak klasörü ve yazdırılacak tek PDF'i oluşturur."):
         ayar = paket.PaketAyarlari(atif_kanitlari=atif_k, docent_oncesi=oncesi,
-                                   atif_yalniz_tam_metin=atif_tam,
                                    tam_bildiri_kitabi=kitap, hafiflet=hafif, genel_belgeler=genel)
         with st.spinner("Başvuru dosyası hazırlanıyor… (büyük arşivlerde birkaç dakika sürebilir)"):
             try:

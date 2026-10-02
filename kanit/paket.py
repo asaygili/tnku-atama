@@ -17,6 +17,7 @@ alanlar dahil edilir. Kanıtı olmayan faaliyetin klasörüne EKSIK.txt yazılı
 from __future__ import annotations
 
 import math
+from collections import Counter
 import shutil
 from dataclasses import dataclass, field
 from datetime import date
@@ -72,6 +73,12 @@ class PaketKalemi:
     baslik: str = ""
     ozet_sayfalar: dict = field(default_factory=dict)   # Path → birleşik PDF'e girecek sayfalar
     yanlis_yer: list[str] = field(default_factory=list)  # başka yayına ait görünen dosyalar
+    # USB klasörüne olduğu gibi kopyalanan alt klasörler (ad → kaynak), ör. yayının atiflar\
+    alt_klasorler: dict = field(default_factory=dict)
+    gizli: bool = False          # kendi klasörü / kapak sayfası yok (belgeleri başka kalemde)
+    duz: bool = False            # dosyaları grup klasörüne doğrudan konur (alt klasörsüz)
+    hedef_adlari: dict = field(default_factory=dict)     # Path → USB'deki dosya adı
+    belge_kalemi: bool = False   # puan satırı değil, bir bölümün ortak belgeleri
 
 
 @dataclass
@@ -118,19 +125,19 @@ def _kanit_dosyalari(k: KanitKaydi, ayar: PaketAyarlari) -> list[Path]:
 
 
 def kalemleri_hazirla(aday, arsiv: KanitArsivi, ayar: PaketAyarlari) -> list[PaketKalemi]:
-    from .atif import atiflari_topla, kimlik_coz
-    from .atif import zaman as atif_zamani
+    from .atif import kimlik_coz
     from .denetim import denetle
 
     import aves_yardimci as ay
     from .arsivden import Eslestirici
 
+    from . import atif_belgeleri
+    from .ayar import atif_haric
+    import tempfile
+
     uyarilar = {id(u.faaliyet): u.eksikler for u in denetle(aday.faaliyetler, arsiv)}
+    atif_kalemleri: list[PaketKalemi] = []
     es = Eslestirici(arsiv)
-    basliklar = {k.aves_kod: ay.baslik_cikar(k.kunye) for k in arsiv.kayitlar if k.aves_kod}
-    atiflar = None
-    atif_yollari: set = set()
-    wos_raporu = None
     kalemler = []
     for f in aday.faaliyetler:
         if f.kod not in t.EK2_PUANLAR:
@@ -144,51 +151,9 @@ def kalemleri_hazirla(aday, arsiv: KanitArsivi, ayar: PaketAyarlari) -> list[Pak
         grup = t.EK2_PUANLAR[f.kod]["grup"]
         kalem = PaketKalemi(0, f, grup, puan, "", eksikler=list(uyarilar.get(id(f), [])))
         if f.kimlik.startswith("atif:"):
-            if ayar.atif_kanitlari:
-                if atiflar is None:
-                    atiflar = atiflari_topla(arsiv, (aday.ad_soyad.split() or [""])[-1])
-                    atif_yollari = {x.yol for x in atiflar}
-                kod, zaman, bolum = kimlik_coz(f.kimlik)
-                basvuru = aday.docent_basvuru_tarihi
-                bilinen = ("5.1", "5.2", "5.5", "5.7")
-                if wos_raporu is None:            # WoS'un resmî atıf raporu (_WoS\*.pdf)
-                    wos_raporu = sorted((arsiv.kok / "_WoS").glob("*.pdf")) \
-                        if (arsiv.kok / "_WoS").is_dir() else []
-                    kalem.dosyalar += wos_raporu
-                # Tam metni olan atıflar önce; yalnızca WoS kaydıyla belgelenenler sonra
-                yalniz_kayit = 0
-                for a in sorted(atiflar, key=lambda a: a.yol.name == "endeks_bilgisi.pdf"):
-                    # endeksi belirsiz atıflar yalnızca kullanıcının onlara verdiği koda girer
-                    ayni_kod = a.endeks == kod if a.endeks else kod not in bilinen
-                    if kod == "5.7" and a.kitap_bolumu != bolum:
-                        continue
-                    if not a.oz_atif and ayni_kod and atif_zamani(a, basvuru) == zaman:
-                        if a.yol.name == "endeks_bilgisi.pdf":
-                            yalniz_kayit += 1
-                            if ayar.atif_yalniz_tam_metin:
-                                continue
-                        kalem.dosyalar.append(a.yol)
-                        # birleşik PDF'e atıf yapan yayının yalnızca ilk sayfası ve
-                        # atıf yapılan eserin geçtiği sayfalar girer (tamamı USB'de)
-                        if (hk := basliklar.get(a.atif_yapilan)):
-                            kalem.ozet_sayfalar[a.yol] = _atif_sayfalari(a.yol, hk)
-                        # aynı klasördeki endeks/dizin kanıtları (atıf yapılan kendi
-                        # yayınımızın kopyası atıf kanıtı değildir)
-                        kalem.dosyalar += [p for p in a.yol.parent.iterdir()
-                                           if p.is_file() and p != a.yol and p.suffix.lower() == ".pdf"
-                                           and p.name not in ATLANAN_ADLAR
-                                           and p not in atif_yollari        # başka bir atıf
-                                           and (p.name == "endeks_bilgisi.pdf"
-                                                or not es.ilk_sayfa_eslesme(p))][:4]
-                if yalniz_kayit:
-                    kalem.eksikler.append(
-                        f"{yalniz_kayit} atıfın tam metni yok; yalnızca WoS kaydıyla belgeli"
-                        + (" (birleşik PDF'e ve USB'ye alınmadı)" if ayar.atif_yalniz_tam_metin
-                           else "") + ". WoS atıf raporunu _WoS klasörüne PDF olarak koyun.")
-                if bolum:
-                    kalem.eksikler.append(
-                        "Kitap bölümündeki atıf: EK-2 5.7 'özgün bilimsel kitapta atıf' şartını "
-                        "karşılayıp karşılamadığı komisyon kararına bağlıdır; ÜAK'ta 5b sayıldı.")
+            # Atıf satırlarının belgeleri tek bir "Atıf belgeleri" kalemindedir (aşağıda)
+            kalem.gizli = True
+            atif_kalemleri.append(kalem)
         else:
             k = arsiv.bul(f)
             kalem.kayit = k
@@ -196,6 +161,11 @@ def kalemleri_hazirla(aday, arsiv: KanitArsivi, ayar: PaketAyarlari) -> list[Pak
                 kalem.dosyalar = (_kanit_dosyalari(k, ayar) if k.aves_kod else
                                   [p for p in k.dosyalar() if p.name not in ATLANAN_ADLAR])
                 if k.aves_kod:
+                    wos = set(atif_belgeleri.wos_goruntuleri(k.klasor))
+                    kalem.dosyalar = [p for p in kalem.dosyalar if p not in wos
+                                      and "atiflar" not in p.parts]
+                    if (k.klasor / "atiflar").is_dir() and any((k.klasor / "atiflar").rglob("*.*")):
+                        kalem.alt_klasorler["atiflar"] = k.klasor / "atiflar"
                     # İlk sayfası açıkça başka bir yayınımıza ait dosya bu faaliyete girmez
                     yanlis = [p for p in kalem.dosyalar if p.suffix.lower() == ".pdf"
                               and p != k.tam_metin and "atiflar" not in p.parts
@@ -219,7 +189,27 @@ def kalemleri_hazirla(aday, arsiv: KanitArsivi, ayar: PaketAyarlari) -> list[Pak
                 tekil.append(p)
         kalem.dosyalar = tekil
         kalemler.append(kalem)
-    kalemler.sort(key=lambda k: (k.grup, _kod_sirasi(k.faaliyet.kod),
+    # Atıflar bölümü: WoS ekran görüntüleri + atıf listeleri + özet (tek kalem, alt klasörsüz)
+    if atif_kalemleri and ayar.atif_kanitlari:
+        belge = atif_belgeleri.hazirla(
+            arsiv, (aday.ad_soyad.split() or [""])[-1], aday.docent_basvuru_tarihi, atif_haric(),
+            Path(tempfile.mkdtemp(prefix="tnku_atif_")))
+        ilk = atif_kalemleri[0]
+        tasiyici = PaketKalemi(0, ilk.faaliyet, ilk.grup, 0.0, "", duz=True, belge_kalemi=True,
+                               dosyalar=[p for p, _ in belge.dosyalar],
+                               hedef_adlari={p: ad for p, ad in belge.dosyalar},
+                               eksikler=list(belge.eksikler))
+        if any(kimlik_coz(k.faaliyet.kimlik)[2] for k in atif_kalemleri):
+            tasiyici.eksikler.append(
+                "Kitap bölümündeki atıf: EK-2 5.7 'özgün bilimsel kitapta atıf' şartını "
+                "karşılayıp karşılamadığı komisyon kararına bağlıdır; ÜAK'ta 5b sayıldı.")
+        toplam = Counter()
+        for c in belge.ozet.values():
+            toplam.update(c)
+        tasiyici.baslik = (f"Atıf belgeleri – {sum(toplam.values())} atıf (doçentlik başvurusu "
+                           f"sonrası {toplam['sonrası']}, öncesi {toplam['öncesi']})")
+        kalemler.append(tasiyici)
+    kalemler.sort(key=lambda k: (k.grup, [999] if k.belge_kalemi else _kod_sirasi(k.faaliyet.kod),
                                  getattr(k.faaliyet, "aves_kod", "") or "~"))
     for i, k in enumerate(kalemler, 1):
         f = k.faaliyet
@@ -228,6 +218,8 @@ def kalemleri_hazirla(aday, arsiv: KanitArsivi, ayar: PaketAyarlari) -> list[Pak
         if k.kayit is not None and k.kayit.aves_kod:
             ad = k.kayit.klasor.name.split("_", 2)[-1]
             k.baslik = ay.baslik_cikar(k.kayit.kunye)
+        elif k.belge_kalemi:
+            pass
         elif f.kimlik.startswith("atif:"):
             _, zaman, bolum = kimlik_coz(f.kimlik)
             k.baslik = (f"{f.adet} atıf (doçentlik başvurusu {zaman})"
@@ -302,13 +294,21 @@ def usb_klasoru(kalemler: list[PaketKalemi], hedef: Path, rapor_pdf: bytes,
         for i, p in enumerate(ayar.genel_belgeler, 1):
             shutil.copy2(p, gd / f"{i:02d}_{p.name}")
     for k in kalemler:
-        d = hedef / f"{10 + k.grup:02d}_{GRUP_ADI[k.grup]}" / k.klasor_adi
+        if k.gizli:
+            continue
+        grup_d = hedef / f"{10 + k.grup:02d}_{GRUP_ADI[k.grup]}"
+        d = grup_d if k.duz else grup_d / k.klasor_adi
         d.mkdir(parents=True, exist_ok=True)
         for i, p in enumerate(k.dosyalar, 1):
+            if p in k.hedef_adlari:
+                shutil.copy2(p, d / k.hedef_adlari[p])
+                continue
             ad = "tam_metin.pdf" if (i == 1 and k.kayit is not None and p == k.kayit.tam_metin) \
                 else p.name
             shutil.copy2(p, d / f"{i:02d}_{ad}")
-        if not k.dosyalar or k.eksikler:
+        for ad, kaynak in k.alt_klasorler.items():
+            shutil.copytree(kaynak, d / ad, dirs_exist_ok=True)
+        if (not k.dosyalar or k.eksikler) and not k.duz:     # notlar listede ve PDF'te
             (d / "EKSIK.txt").write_text(
                 "Bu faaliyet için eksik görünen kanıtlar:\n"
                 + "\n".join(f"- {e}" for e in (k.eksikler or ["Kanıt belgesi yok"])) + "\n",
@@ -325,9 +325,14 @@ def _liste_yaz(kalemler, yol: Path):
     ws.append(["#", "Grup", "AVES", "EK-2", "Faaliyet", "Adet", "Puan", "Dosya", "Eksik", "Klasör"])
     for k in kalemler:
         f = k.faaliyet
+        if k.belge_kalemi:
+            ws.append(["", GOSTERIM[k.grup], "", "5.x", k.baslik, "", "", len(k.dosyalar),
+                       "; ".join(k.eksikler), f"{10 + k.grup:02d}_{GRUP_ADI[k.grup]}"])
+            continue
         ws.append([k.sira, GOSTERIM[k.grup], getattr(f, "aves_kod", ""), f.kod,
                    t.EK2_PUANLAR[f.kod]["ad"], f.adet, k.puan, len(k.dosyalar),
-                   "; ".join(k.eksikler), k.klasor_adi])
+                   "; ".join(k.eksikler),
+                   "" if k.gizli else k.klasor_adi])
     for c in ws[1]:
         c.font = Font(bold=True, color="FFFFFF")
         c.fill = PatternFill("solid", fgColor="2E5DA3")
@@ -389,6 +394,8 @@ def birlesik_pdf(kalemler: list[PaketKalemi], aday, sonuc, rapor_pdf: bytes, hed
     son_grup = None
     for k in kalemler:
         f = k.faaliyet
+        if k.gizli:
+            continue
         bas = govde.page_count
         if k.grup != son_grup:
             toc_govde.append([1, GOSTERIM[k.grup], bas + 1])
@@ -404,18 +411,24 @@ def birlesik_pdf(kalemler: list[PaketKalemi], aday, sonuc, rapor_pdf: bytes, hed
                                    f"tamamı USB klasöründe)")
             elif p.suffix.lower() in PDF_GOMULEBILIR | RESIM and mb <= ayar.pdf_dosya_siniri_mb:
                 gomulecek.append(p)
-                dosya_satir.append(f"• {p.name}")
+                dosya_satir.append(f"• {k.hedef_adlari.get(p, p.name)}")
             else:
                 neden = "büyük dosya" if mb > ayar.pdf_dosya_siniri_mb else p.suffix.lower()
                 dosya_satir.append(f"• {p.name}  (yalnızca USB klasöründe – {neden})")
                 pdf_disi.append(f"{k.klasor_adi}/{p.name}")
+        if k.alt_klasorler:
+            dosya_satir += [f"• {ad}\\ klasörü  (yalnızca USB klasöründe)" for ad in k.alt_klasorler]
         yaz.sayfa([
-            (f"{GOSTERIM[k.grup]}  ·  {k.sira}. faaliyet", 10, False),
-            (f"{getattr(f, 'aves_kod', '') or '—'}   EK-2 {f.kod} – {t.EK2_PUANLAR[f.kod]['ad']}",
-             14, True),
-            (kunye or "", 10, False),
-            (f"Adet: {f.adet}    Puan: {k.puan:g}"
-             + ("    Doçentlik başvurusu sonrası" if t.docent_basvuru_sonrasi_mi(f, aday) else ""),
+            (f"{GOSTERIM[k.grup]}" + ("" if k.belge_kalemi else f"  ·  {k.sira}. faaliyet"), 10, False),
+            ((k.baslik, 14, True) if k.belge_kalemi else
+             (f"{getattr(f, 'aves_kod', '') or '—'}   EK-2 {f.kod} – {t.EK2_PUANLAR[f.kod]['ad']}",
+              14, True)),
+            ("" if k.belge_kalemi else kunye or "", 10, False),
+            (("Her yayın için Web of Science atıf ekran görüntüsü ve atıfların tarih ile doçentlik "
+              "başvurusu öncesi/sonrası dökümü. Atıf yapan yayınların kendileri ilgili yayının "
+              "'atiflar' alt klasöründedir (USB).") if k.belge_kalemi else
+             (f"Adet: {f.adet}    Puan: {k.puan:g}"
+              + ("    Doçentlik başvurusu sonrası" if t.docent_basvuru_sonrasi_mi(f, aday) else "")),
              10, False),
             ("Kanıt belgeleri:\n" + ("\n".join(dosya_satir) or "• (yok)"), 10, False),
             (("Eksik görünen kanıtlar:\n" + "\n".join(f"• {e}" for e in k.eksikler))
@@ -443,11 +456,12 @@ def birlesik_pdf(kalemler: list[PaketKalemi], aday, sonuc, rapor_pdf: bytes, hed
                 else:
                     img = fitz.open(p)
                     govde.insert_pdf(fitz.open("pdf", img.convert_to_pdf()))
-                alt_toc.append([3, p.name[:80], sayfa_no])
+                alt_toc.append([3, k.hedef_adlari.get(p, p.name)[:80], sayfa_no])
             except Exception as e:  # noqa: BLE001
                 pdf_disi.append(f"{k.klasor_adi}/{p.name} (açılamadı: {e})")
-        baslik = f"{getattr(f, 'aves_kod', '') or '#' + str(k.sira)} · {f.kod} · " \
-                 f"{(k.baslik or t.EK2_PUANLAR[f.kod]['ad'])[:70]}"
+        baslik = (k.baslik[:90] if k.belge_kalemi else
+                  f"{getattr(f, 'aves_kod', '') or '#' + str(k.sira)} · {f.kod} · "
+                  f"{(k.baslik or t.EK2_PUANLAR[f.kod]['ad'])[:70]}")
         toc_govde.append([2, baslik, bas + 1])
         toc_govde += alt_toc
         icindekiler.append((k.sira, baslik, bas))
