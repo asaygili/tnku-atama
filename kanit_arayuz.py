@@ -202,7 +202,14 @@ def aves_klasor_islemleri(a: KanitArsivi | None, faaliyetler) -> None:
     if a is None:
         return
     plan = kk.numara_plani(a, faaliyetler)
-    if plan:
+    cakisma = kk.plan_cakismalari(a, plan) if plan else []
+    if plan and cakisma:
+        st.error("⛔ AVES'teki sıra ile kanıt klasörleri uyuşmuyor, ama önerilen yeniden adlandırma "
+                 "aynı kodu iki klasöre verirdi. Bu genellikle faaliyet listesinin **eski bir AVES "
+                 "önbelleğinden** yüklendiğini gösterir. Klasörlere dokunulmadı: '⚡ Yükle ve Ekle'yi "
+                 "**canlı çek** işaretliyken yeniden çalıştırın.\n\n"
+                 + "\n".join(f"- {c}" for c in cakisma[:10]))
+    elif plan:
         st.warning("🔢 AVES'teki sıra değişmiş; şu kanıt klasörlerinin kodu güncellenmeli:\n\n"
                    + "\n".join(f"- `{p.kayit.klasor.name}` → `{p.yeni_ad}`" for p in plan))
         if st.button("Klasörleri yeniden adlandır", key="kanit_numara", help="AVES'teki sıra değiştiği için kanıt klasörlerinin kodlarını (UM01, UB03…) günceller. Dosyalara dokunulmaz."):
