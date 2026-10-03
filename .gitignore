@@ -5,3 +5,6 @@ __pycache__/
 aday.json
 aday.json.bak
 _eslestirme_kurallari.json
+
+# Streamlit gizli ayarları (giriş şifresi vb.) repoya girmez
+.streamlit/secrets.toml

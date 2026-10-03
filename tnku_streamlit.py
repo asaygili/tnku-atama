@@ -679,6 +679,10 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+# Streamlit Cloud: Secrets'ta giris_sifresi tanımlıysa önce şifre sorulur
+import giris  # noqa: E402
+giris.sifre_kontrol()
+
 components.html("""
 <script>
 (function() {
