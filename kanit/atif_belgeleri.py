@@ -27,6 +27,23 @@ class AtifBelgeleri:
     dosyalar: list[tuple[Path, str]] = field(default_factory=list)   # (kaynak, hedef adı)
     eksikler: list[str] = field(default_factory=list)
     ozet: dict = field(default_factory=dict)          # aves_kod → Counter(zaman)
+    # aves_kod → {"UM20_1": [atıf yapan yayın PDF'i, endeks belgeleri …], …}
+    klasorler: dict = field(default_factory=dict)
+
+
+# Atıf klasörlerinde başvuru dosyasına girmeyen program dosyaları
+ATLANAN = {"kayit.json", "indirilecek.txt", "desktop.ini", "thumbs.db", "kunye.txt"}
+
+
+def atif_dosyalari(a, ayni_klasordeki: int) -> list[Path]:
+    """Bir atıfın belgeleri: atıf yapan yayının PDF'i (yoksa WoS kaydından üretilen
+    endeks_bilgisi.pdf) ve – klasörde yalnızca bu atıf varsa – yanındaki endeks belgeleri."""
+    dosyalar = [a.yol] if a.yol.exists() else []
+    if ayni_klasordeki == 1 and a.yol.parent.name.lower() != "atiflar":
+        dosyalar += sorted(p for p in a.yol.parent.iterdir()
+                           if p.is_file() and p != a.yol and p.name.lower() not in ATLANAN
+                           and p.suffix.lower() in (".pdf", ".png", ".jpg", ".jpeg"))
+    return dosyalar
 
 
 def wos_goruntuleri(klasor: Path) -> list[Path]:
@@ -100,6 +117,7 @@ def hazirla(arsiv: KanitArsivi, soyad: str, basvuru: date | None, haric: tuple[s
     yayina_gore = defaultdict(list)
     for a in atiflar:
         yayina_gore[a.atif_yapilan].append(a)
+    klasor_sayisi = Counter(a.yol.parent for a in atiflar)
     kayitlar = {k.aves_kod: k for k in arsiv.kayitlar if k.aves_kod}
     kodlar = sorted({*yayina_gore, *(k for k, v in kayitlar.items() if wos_goruntuleri(v.klasor))},
                     key=lambda k: ({"UM": 0, "UL": 1, "KB": 2, "UB": 3, "NB": 4}.get(k[:2], 9), k))
@@ -119,11 +137,13 @@ def hazirla(arsiv: KanitArsivi, soyad: str, basvuru: date | None, haric: tuple[s
         baslik = ay.baslik_cikar(kay.kunye) if kay and kay.kunye else kod
         if liste:
             satirlar = []
+            sonuc.klasorler[kod] = {}
             for i, a in enumerate(liste, 1):
                 b = ka_atif.bilgi(a, arsiv.kok / "_onbellek" / "crossref.json")
-                satirlar.append([i, b["baslik"], b["dergi"], b["tarih"],
+                satirlar.append([b["baslik"], b["dergi"], b["tarih"],
                                  ENDEKS_ADI.get(a.endeks or belirsiz_kod or "", a.endeks or "?"),
-                                 ZAMAN_ADI[ka_atif.zaman(a, basvuru)]])
+                                 ZAMAN_ADI[ka_atif.zaman(a, basvuru)], f"{kod}_{i}"])
+                sonuc.klasorler[kod][f"{kod}_{i}"] = atif_dosyalari(a, klasor_sayisi[a.yol.parent])
             yol = gecici / f"{kod}_atif_listesi.pdf"
             _tablo_pdf(yol, f"{kod} – {baslik}",
                        f"Bu yayına yapılan ve puanlamaya giren {len(liste)} atıf (öz atıflar hariç"
@@ -133,9 +153,11 @@ def hazirla(arsiv: KanitArsivi, soyad: str, basvuru: date | None, haric: tuple[s
                        + (f" · tarihi bilinmeyen: {sayac['bilinmiyor']}" if sayac["bilinmiyor"] else "")
                        + ". Tarih, atıf yapan yayının yayım tarihidir (WoS kaydından ay, diğerlerinde "
                          "yıl); başvuru yılındaki yalnızca yılı bilinen atıflar temkinli olarak "
-                         "'öncesi' sayılmıştır.",
-                       ["#", "Atıf yapan yayın", "Dergi", "Tarih", "Endeks", "Doçentlik başvurusu"],
-                       satirlar, [0.9, 7.4, 3.6, 1.8, 2.4, 2.1])
+                         "'öncesi' sayılmıştır. Her atıfın belgeleri yayın klasöründeki "
+                         "atiflar\\<b>Klasör</b> alt klasöründedir.",
+                       ["Atıf yapan yayın", "Dergi", "Tarih", "Endeks", "Doçentlik başvurusu",
+                        "Klasör"],
+                       satirlar, [6.4, 3.2, 1.7, 2.6, 1.9, 2.0])
             sonuc.dosyalar.append((yol, yol.name))
         ozet_satir.append([kod, baslik, sayac["sonrası"], sayac["öncesi"],
                            sayac["bilinmiyor"] or "", sum(sayac.values()),

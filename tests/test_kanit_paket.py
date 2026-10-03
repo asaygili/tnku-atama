@@ -122,7 +122,10 @@ class Paket(unittest.TestCase):
         self.assertIn("Sonrası", liste)                    # 2024 atıfı, başvuru 01.01.2023
         # Yayın klasöründe atiflar\ alt klasörü aynen; wos_atif yayın klasörüne girmez
         um01 = next((ps.klasor / "11_Makaleler").glob("*_UM01_*"))
-        self.assertTrue((um01 / "atiflar" / "A1 (SCI)" / "citing.pdf").exists())
+        # her atıf ayrı, listedeki sırayla numaralı klasörde (kaynak klasör adı görünmez)
+        self.assertEqual([p.name for p in (um01 / "atiflar").iterdir()], ["UM01_1"])
+        self.assertTrue((um01 / "atiflar" / "UM01_1" / "citing.pdf").exists())
+        self.assertIn("UM01_1", liste)                    # listede Klasör sütunu
         self.assertFalse(any("wos_atif" in p.name for p in um01.iterdir()))
         # Birleşik PDF'e atıf yapan yayının sayfaları girmez
         metin = "".join(s.get_text() for s in fitz.open(ps.pdf))

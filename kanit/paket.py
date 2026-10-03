@@ -73,7 +73,8 @@ class PaketKalemi:
     baslik: str = ""
     ozet_sayfalar: dict = field(default_factory=dict)   # Path → birleşik PDF'e girecek sayfalar
     yanlis_yer: list[str] = field(default_factory=list)  # başka yayına ait görünen dosyalar
-    # USB klasörüne olduğu gibi kopyalanan alt klasörler (ad → kaynak), ör. yayının atiflar\
+    # USB klasöründe oluşturulan alt klasörler: göreli yol → dosyalar
+    # (ör. "atiflar/UM20_1" → [atıf yapan yayın PDF'i, endeks belgesi])
     alt_klasorler: dict = field(default_factory=dict)
     gizli: bool = False          # kendi klasörü / kapak sayfası yok (belgeleri başka kalemde)
     duz: bool = False            # dosyaları grup klasörüne doğrudan konur (alt klasörsüz)
@@ -164,8 +165,6 @@ def kalemleri_hazirla(aday, arsiv: KanitArsivi, ayar: PaketAyarlari) -> list[Pak
                     wos = set(atif_belgeleri.wos_goruntuleri(k.klasor))
                     kalem.dosyalar = [p for p in kalem.dosyalar if p not in wos
                                       and "atiflar" not in p.parts]
-                    if (k.klasor / "atiflar").is_dir() and any((k.klasor / "atiflar").rglob("*.*")):
-                        kalem.alt_klasorler["atiflar"] = k.klasor / "atiflar"
                     # İlk sayfası açıkça başka bir yayınımıza ait dosya bu faaliyete girmez
                     yanlis = [p for p in kalem.dosyalar if p.suffix.lower() == ".pdf"
                               and p != k.tam_metin and "atiflar" not in p.parts
@@ -189,11 +188,19 @@ def kalemleri_hazirla(aday, arsiv: KanitArsivi, ayar: PaketAyarlari) -> list[Pak
                 tekil.append(p)
         kalem.dosyalar = tekil
         kalemler.append(kalem)
-    # Atıflar bölümü: WoS ekran görüntüleri + atıf listeleri + özet (tek kalem, alt klasörsüz)
-    if atif_kalemleri and ayar.atif_kanitlari:
+    # Atıflar: her yayının içinde atiflar\KOD_1, KOD_2 … (listedeki sırayla) ve Atıflar
+    # bölümünde WoS ekran görüntüleri + atıf listeleri + özet (tek kalem, alt klasörsüz)
+    belge = None
+    if ayar.atif_kanitlari and (atif_kalemleri or any(
+            k.kayit is not None and (k.kayit.klasor / "atiflar").is_dir() for k in kalemler)):
         belge = atif_belgeleri.hazirla(
             arsiv, (aday.ad_soyad.split() or [""])[-1], aday.docent_basvuru_tarihi, atif_haric(),
             Path(tempfile.mkdtemp(prefix="tnku_atif_")))
+        for k in kalemler:
+            kod = k.kayit.aves_kod if k.kayit is not None else ""
+            for alt, dosyalar in belge.klasorler.get(kod, {}).items():
+                k.alt_klasorler[f"atiflar/{alt}"] = dosyalar
+    if atif_kalemleri and belge is not None:
         ilk = atif_kalemleri[0]
         tasiyici = PaketKalemi(0, ilk.faaliyet, ilk.grup, 0.0, "", duz=True, belge_kalemi=True,
                                dosyalar=[p for p, _ in belge.dosyalar],
@@ -306,8 +313,14 @@ def usb_klasoru(kalemler: list[PaketKalemi], hedef: Path, rapor_pdf: bytes,
             ad = "tam_metin.pdf" if (i == 1 and k.kayit is not None and p == k.kayit.tam_metin) \
                 else p.name
             shutil.copy2(p, d / f"{i:02d}_{ad}")
-        for ad, kaynak in k.alt_klasorler.items():
-            shutil.copytree(kaynak, d / ad, dirs_exist_ok=True)
+        for ad, dosyalar in k.alt_klasorler.items():
+            alt = d / ad
+            alt.mkdir(parents=True, exist_ok=True)
+            for p in dosyalar:
+                hedef_dosya = alt / p.name
+                if hedef_dosya.exists():               # aynı adlı iki belge
+                    hedef_dosya = alt / f"{p.stem}_2{p.suffix}"
+                shutil.copy2(p, hedef_dosya)
         if (not k.dosyalar or k.eksikler) and not k.duz:     # notlar listede ve PDF'te
             (d / "EKSIK.txt").write_text(
                 "Bu faaliyet için eksik görünen kanıtlar:\n"
@@ -417,7 +430,9 @@ def birlesik_pdf(kalemler: list[PaketKalemi], aday, sonuc, rapor_pdf: bytes, hed
                 dosya_satir.append(f"• {p.name}  (yalnızca USB klasöründe – {neden})")
                 pdf_disi.append(f"{k.klasor_adi}/{p.name}")
         if k.alt_klasorler:
-            dosya_satir += [f"• {ad}\\ klasörü  (yalnızca USB klasöründe)" for ad in k.alt_klasorler]
+            adlar = [ad.split("/")[-1] for ad in k.alt_klasorler]
+            dosya_satir.append(f"• atiflar\\ klasörü: {len(adlar)} atıf ({adlar[0]} … {adlar[-1]}; "
+                               "yalnızca USB klasöründe)")
         yaz.sayfa([
             (f"{GOSTERIM[k.grup]}" + ("" if k.belge_kalemi else f"  ·  {k.sira}. faaliyet"), 10, False),
             ((k.baslik, 14, True) if k.belge_kalemi else
