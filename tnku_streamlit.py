@@ -479,11 +479,17 @@ try:
             yayin_yil = _yayin_yili_bul(metin_)
             return yayin_yil > docent_yil if yayin_yil > 0 else False
 
-        canli = bool(_st2.session_state.get("v_aves_canli", False))
-        veri = {} if canli else _aves_yukle_cv(cv_url)
+        # Önce canlı AVES; yalnızca canlı çekme başarısız olursa (ya da kullanıcı isterse)
+        # yerel önbellek. Eski önbellek yeni eklenen yayınları içermez ve AVES kodlarını kaydırır.
+        onbellek_tercih = bool(_st2.session_state.get("v_aves_onbellek", False))
+        veri = _aves_yukle_cv(cv_url) if onbellek_tercih else _aves_canli_cek(cv_url)
         sch  = _aves_scholar_yukle(cv_url)
+        _st2.session_state["_aves_kaynak"] = "önbellek" if onbellek_tercih else "canlı"
         if not veri:
-            veri = _aves_canli_cek(cv_url)
+            veri = _aves_yukle_cv(cv_url) if not onbellek_tercih else _aves_canli_cek(cv_url)
+            _st2.session_state["_aves_kaynak"] = (
+                f"önbellek ({veri.get('_tarama_zamani', 'tarihi bilinmiyor')}) – canlı çekilemedi"
+                if not onbellek_tercih and veri else "canlı")
 
         faaliyetler = []
         ekle = faaliyetler.append
@@ -1822,8 +1828,10 @@ with tab1:
                 "dışa aktarımı / kanıt klasörüyle, h-endeksi 5.9 olarak elle girin.")
 
     ba1, ba2, ba3 = st.columns([2, 2, 1])
-    st.checkbox("AVES'ten canlı çek (yerel önbelleği kullanma)", key="v_aves_canli",
-                help="İşaretlenmezse daha önce kaydedilmiş cv_data önbelleği varsa o kullanılır.")
+    st.checkbox("İnternet yerine yerel AVES önbelleğini kullan", key="v_aves_onbellek",
+                help="Normalde veriler AVES'ten canlı çekilir. Önbellek eski olabilir: yeni eklenen "
+                     "yayınları içermez ve kanıt klasörlerinin kodları kayar. Yalnızca internet "
+                     "yokken kullanın.")
     with ba1:
         if st.button("⚡ Yükle ve Ekle", type="primary",
                      use_container_width=True,
@@ -1849,8 +1857,13 @@ with tab1:
                         yeni = []
                 if yeni:
                     from kanit import otomatik as _oto
-                    _rapor = [f"⚡ AVES'ten {len(yeni)} faaliyet alındı (önceki liste güncellendi, "
-                              f"tekrar eklenen yok)"]
+                    _kaynak = st.session_state.get("_aves_kaynak", "canlı")
+                    _rapor = [f"⚡ AVES'ten ({_kaynak}) {len(yeni)} faaliyet alındı (önceki liste "
+                              f"güncellendi, tekrar eklenen yok)"]
+                    if _kaynak != "canlı":
+                        _rapor.append("⚠️ Veriler önbellekten geldi; AVES'teki son değişiklikler "
+                                      "eksik olabilir. Kanıt klasörlerini bu listeye göre yeniden "
+                                      "adlandırmayın.")
                     _liste = _oto.birlestir(list(st.session_state.faaliyetler), yeni)
                     _a = ka.arsiv()
                     if _a is not None:

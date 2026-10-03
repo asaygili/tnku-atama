@@ -88,8 +88,26 @@ def numara_plani(arsiv: KanitArsivi, faaliyetler) -> list[YenidenAdlandirma]:
     return plan
 
 
+def plan_cakismalari(arsiv: KanitArsivi, plan: list[YenidenAdlandirma]) -> list[str]:
+    """Plan uygulanınca iki klasör aynı AVES kodunu taşıyacak mı?
+
+    AVES listesi eksik ya da eskiyse (ör. yeni eklenen yayınları içermeyen önbellek) planda
+    olmayan klasörlerin kodları yeni kodlarla çakışır; böyle bir plan uygulanmamalıdır."""
+    tasinan = {id(p.kayit) for p in plan}
+    son: dict[str, list[str]] = {}
+    for k in arsiv.kayitlar:
+        if k.aves_kod and id(k) not in tasinan:
+            son.setdefault(k.aves_kod, []).append(k.klasor.name)
+    for p in plan:
+        son.setdefault(p.yeni_kod, []).append(p.yeni_ad)
+    return [f"{kod}: " + " · ".join(adlar) for kod, adlar in sorted(son.items()) if len(adlar) > 1]
+
+
 def numara_uygula(arsiv: KanitArsivi, plan: list[YenidenAdlandirma]) -> None:
-    """İki aşamalı yeniden adlandırma (UM01↔UM02 gibi yer değişimlerinde çakışma olmaz)."""
+    """İki aşamalı yeniden adlandırma (UM01↔UM02 gibi yer değişimlerinde çakışma olmaz).
+    Sonunda iki klasör aynı kodu taşıyacaksa hiçbir şey yapılmaz (ValueError)."""
+    if cakisma := plan_cakismalari(arsiv, plan):
+        raise ValueError("Yeniden adlandırma kod çakışması doğurur: " + "; ".join(cakisma))
     gecici = []
     for i, p in enumerate(plan):
         tmp = p.kayit.klasor.with_name(f"__yeniden_{i}_{p.kayit.klasor.name}")

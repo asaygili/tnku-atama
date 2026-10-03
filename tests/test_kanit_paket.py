@@ -108,13 +108,63 @@ class Paket(unittest.TestCase):
         self.assertIn("UM01", ayrac)
         self.assertIn("Deep Learning for Retinal", ayrac)
         self.assertIn("UM02 yayınına ait", ayrac)
+        # Birleşik PDF'te yayının yalnızca ilk sayfası; USB'de tam metnin tamamı
+        metin = "".join(s.get_text() for s in d)
+        self.assertIn("full text", metin)
+        self.assertNotIn("body", metin)
+        self.assertEqual(fitz.open(um01 / "01_tam_metin.pdf").page_count, 5)
 
-    def test_atif_ozet_sayfalari(self):
+    def test_program_ad_sayfalari(self):
+        from test_kanit import pdf_yaz as yaz
+        yaz(self.um01 / "conference program.pdf",
+            ["Program", "Session A: Jones, Smith", "Session B: Ali Yilmaz - Retinal", "Closing"])
+        yaz(self.um02 / "program.pdf", ["Kisa program", "Yilmaz"])          # 2 sayfa: tamamı
         aday = self._aday()
+        aday.ad_soyad = "Ali Yılmaz"                       # programda "Yilmaz" olarak geçer
         kalemler = paket.kalemleri_hazirla(aday, self.arsiv, paket.PaketAyarlari())
-        atif_k = next(k for k in kalemler if k.faaliyet.kimlik.startswith("atif:"))
-        citing = next(p for p in atif_k.dosyalar if p.name == "citing.pdf")
-        self.assertEqual(atif_k.ozet_sayfalar[citing], [0, 2])   # ilk sayfa + atıf sayfası
+        um01 = next(k for k in kalemler if getattr(k.faaliyet, "aves_kod", "") == "UM01")
+        prog = next(p for p in um01.dosyalar if p.name == "conference program.pdf")
+        self.assertEqual(um01.ozet_sayfalar[prog], [2])
+        self.assertIn("adınızın geçtiği sayfalar: 3", um01.ozet_notlari[prog])
+        um02 = next(k for k in kalemler if getattr(k.faaliyet, "aves_kod", "") == "UM02")
+        self.assertNotIn(next(p for p in um02.dosyalar if p.name == "program.pdf"), um02.ozet_sayfalar)
+
+    def test_tam_metin_secenegi(self):
+        aday = self._aday()
+        ps = paket.paket_olustur(aday, t.kriter_kontrol(aday), self.arsiv, self.cikti, rapor_pdf(1),
+                                 paket.PaketAyarlari(calisma_ilk_sayfa=False))
+        self.assertIn("body", "".join(s.get_text() for s in fitz.open(ps.pdf)))
+
+    def test_atif_belgeleri(self):
+        pdf_yaz(self.um01 / "wos_atif.pdf", ["WoS citing articles"])
+        aday = self._aday()
+        ps = paket.paket_olustur(aday, t.kriter_kontrol(aday), self.arsiv, self.cikti,
+                                 rapor_pdf(1), paket.PaketAyarlari())
+        atif_d = ps.klasor / "15_Atiflar"
+        # Atıflar klasöründe yalnızca özet, WoS ekran görüntüsü ve atıf listesi
+        self.assertEqual(sorted(p.name for p in atif_d.iterdir()),
+                         ["00_Atif_Ozeti.pdf", "UM01_atif_listesi.pdf", "UM01_wos_atif.pdf"])
+        liste = fitz.open(atif_d / "UM01_atif_listesi.pdf")[0].get_text().replace(" ", " ")
+        self.assertIn("Sonrası", liste)                    # 2024 atıfı, başvuru 01.01.2023
+        # Yayın klasöründe atiflar\ alt klasörü aynen; wos_atif yayın klasörüne girmez
+        um01 = next((ps.klasor / "11_Makaleler").glob("*_UM01_*"))
+        # her atıf ayrı, listedeki sırayla numaralı klasörde (kaynak klasör adı görünmez)
+        self.assertEqual([p.name for p in (um01 / "atiflar").iterdir()], ["UM01_1"])
+        self.assertTrue((um01 / "atiflar" / "UM01_1" / "citing.pdf").exists())
+        self.assertIn("UM01_1", liste)                    # listede Klasör sütunu
+        self.assertFalse(any("wos_atif" in p.name for p in um01.iterdir()))
+        # Birleşik PDF'e atıf yapan yayının sayfaları girmez
+        metin = "".join(s.get_text() for s in fitz.open(ps.pdf))
+        self.assertNotIn("references:", metin)          # atıf yapan yayının sayfaları yok
+        self.assertIn("Atıf belgeleri", metin.replace(" ", " "))
+
+    def test_esci_haric(self):
+        a = [atif.Atif("UM01", Path("a.pdf"), "5.1", False, "", 2024),
+             atif.Atif("UM01", Path("b.pdf"), "5.2", False, "", 2024),
+             atif.Atif("UM01", Path("c.pdf"), "5.1", True, "", 2024)]
+        self.assertEqual([x.yol.name for x in atif.sayilan(a, haric=("5.2",))], ["a.pdf"])
+        fl = atif.faaliyetler(a, date(2023, 1, 1), None, t.Faaliyet, haric=("5.2",))
+        self.assertEqual([(f.kod, f.adet) for f in fl], [("5.1", 1)])
 
     def test_docent_oncesi_haric(self):
         aday = self._aday()
