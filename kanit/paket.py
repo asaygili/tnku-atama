@@ -55,6 +55,9 @@ class PaketAyarlari:
     # (USB klasöründeki dosyalar özgün kalır)
     hafiflet: bool = True
     pdf_dosya_siniri_mb: float = 15.0  # birleşik PDF'e alınacak en büyük dosya
+    # birleşik PDF'e yayınların (tam metin, bildiri sayfaları) yalnızca ilk sayfası girer;
+    # tamamı USB klasöründedir. Başlıca Araştırma Eseri her zaman tam metin girer.
+    calisma_ilk_sayfa: bool = True
     # yalnızca tam metni olan atıfları koy (WoS kaydıyla belgelenenler dışarıda kalır)
     atif_yalniz_tam_metin: bool = False
     genel_belgeler: list[Path] = field(default_factory=list)
@@ -180,6 +183,12 @@ def kalemleri_hazirla(aday, arsiv: KanitArsivi, ayar: PaketAyarlari) -> list[Pak
                                           or p.name == "bildiri_kitabi_kapak_kunye.pdf"
                                           or p.suffix.lower() != ".pdf"
                                           or es.ilk_sayfa_eslesme(p) != k.aves_kod]
+        # Birleşik PDF'e yayının kendisinden yalnızca ilk sayfa (USB'de tamamı)
+        if ayar.calisma_ilk_sayfa and kalem.kayit is not None and kalem.kayit.aves_kod \
+                and not getattr(f, "baslica_eser", False):
+            for p in kalem.dosyalar:
+                if p == kalem.kayit.tam_metin or p.name == "bildiri_sayfalari.pdf":
+                    kalem.ozet_sayfalar[p] = [0]
         # aynı içerik bir kalemde bir kez (ayrı kaydedilmiş sürümler dahil)
         gorulen, tekil = set(), []
         for p in kalem.dosyalar:
@@ -420,8 +429,9 @@ def birlesik_pdf(kalemler: list[PaketKalemi], aday, sonuc, rapor_pdf: bytes, hed
             mb = p.stat().st_size / 1e6
             if p in k.ozet_sayfalar:
                 gomulecek.append(p)
-                dosya_satir.append(f"• {p.name}  (ilk sayfa ve atıf yapılan sayfalar; "
-                                   f"tamamı USB klasöründe)")
+                ne = ("yalnızca ilk sayfa" if k.ozet_sayfalar[p] == [0]
+                      else "ilk sayfa ve atıf yapılan sayfalar")
+                dosya_satir.append(f"• {p.name}  ({ne}; tamamı USB klasöründe)")
             elif p.suffix.lower() in PDF_GOMULEBILIR | RESIM and mb <= ayar.pdf_dosya_siniri_mb:
                 gomulecek.append(p)
                 dosya_satir.append(f"• {k.hedef_adlari.get(p, p.name)}")

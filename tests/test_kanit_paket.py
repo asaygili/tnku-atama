@@ -108,6 +108,17 @@ class Paket(unittest.TestCase):
         self.assertIn("UM01", ayrac)
         self.assertIn("Deep Learning for Retinal", ayrac)
         self.assertIn("UM02 yayınına ait", ayrac)
+        # Birleşik PDF'te yayının yalnızca ilk sayfası; USB'de tam metnin tamamı
+        metin = "".join(s.get_text() for s in d)
+        self.assertIn("full text", metin)
+        self.assertNotIn("body", metin)
+        self.assertEqual(fitz.open(um01 / "01_tam_metin.pdf").page_count, 5)
+
+    def test_tam_metin_secenegi(self):
+        aday = self._aday()
+        ps = paket.paket_olustur(aday, t.kriter_kontrol(aday), self.arsiv, self.cikti, rapor_pdf(1),
+                                 paket.PaketAyarlari(calisma_ilk_sayfa=False))
+        self.assertIn("body", "".join(s.get_text() for s in fitz.open(ps.pdf)))
 
     def test_atif_belgeleri(self):
         pdf_yaz(self.um01 / "wos_atif.pdf", ["WoS citing articles"])
