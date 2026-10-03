@@ -590,6 +590,11 @@ def paket_bolumu(aday, sonuc, a: KanitArsivi | None, rapor_pdf) -> None:
             help="Makale, bildiri ve kitap bölümlerinin birleşik PDF'e yalnızca ilk sayfası girer; "
                  "tam metinler USB klasöründe kalır. Başlıca Araştırma Eseri her zaman tam metin "
                  "girer. Endeks ve kapak gibi kanıt belgeleri etkilenmez.")
+        prog = st.checkbox(
+            "Bildiri programlarından yalnızca adımın geçtiği sayfaları koy", value=True,
+            key="pk_program",
+            help="Kongre programlarından birleşik PDF'e yalnızca adınızın (bulunamazsa bildiri "
+                 "başlığının) geçtiği sayfalar girer; programın tamamı USB klasöründe kalır.")
         hafif = st.checkbox("Birleşik PDF'i hafiflet (taranmış belgeler 110 dpi)", value=True,
                             key="pk_hafif", help="USB klasöründeki dosyalar özgün kalır; tam "
                                                   "metinlere dokunulmaz.")
@@ -604,7 +609,7 @@ def paket_bolumu(aday, sonuc, a: KanitArsivi | None, rapor_pdf) -> None:
     if st.button("📦 Başvuru dosyasını hazırla", type="primary", key="pk_hazirla", help="Puan alan faaliyetleri kanıtlarıyla birlikte EK-2 sırasına dizer; USB'ye kopyalanacak klasörü ve yazdırılacak tek PDF'i oluşturur."):
         ayar = paket.PaketAyarlari(atif_kanitlari=atif_k, docent_oncesi=oncesi,
                                    tam_bildiri_kitabi=kitap, hafiflet=hafif, genel_belgeler=genel,
-                                   calisma_ilk_sayfa=ilk_sayfa)
+                                   calisma_ilk_sayfa=ilk_sayfa, program_ad_sayfalari=prog)
         with st.spinner("Başvuru dosyası hazırlanıyor… (büyük arşivlerde birkaç dakika sürebilir)"):
             try:
                 st.session_state["_pk_sonuc"] = paket.paket_olustur(

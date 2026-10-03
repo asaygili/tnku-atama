@@ -26,7 +26,7 @@ from pathlib import Path
 import tnku_atama as t
 
 from .kayit import KanitArsivi, KanitKaydi
-from .ortak import md5, slug
+from .ortak import md5, norm, slug
 
 GRUP_ADI = {1: "Makaleler", 2: "Kitap_ve_Kitap_Bolumleri", 3: "Bildiriler", 4: "Editorluk",
             5: "Atiflar", 6: "Hakemlik", 7: "Panelist_ve_Juri", 8: "TV_Sinema_Tasarim",
@@ -58,6 +58,9 @@ class PaketAyarlari:
     # birleşik PDF'e yayınların (tam metin, bildiri sayfaları) yalnızca ilk sayfası girer;
     # tamamı USB klasöründedir. Başlıca Araştırma Eseri her zaman tam metin girer.
     calisma_ilk_sayfa: bool = True
+    # bildiri programlarından birleşik PDF'e yalnızca adayın adının (ya da bildiri başlığının)
+    # geçtiği sayfalar girer; tamamı USB klasöründedir
+    program_ad_sayfalari: bool = True
     # yalnızca tam metni olan atıfları koy (WoS kaydıyla belgelenenler dışarıda kalır)
     atif_yalniz_tam_metin: bool = False
     genel_belgeler: list[Path] = field(default_factory=list)
@@ -75,6 +78,7 @@ class PaketKalemi:
     kayit: KanitKaydi | None = None
     baslik: str = ""
     ozet_sayfalar: dict = field(default_factory=dict)   # Path → birleşik PDF'e girecek sayfalar
+    ozet_notlari: dict = field(default_factory=dict)    # Path → kapak sayfasındaki açıklama
     yanlis_yer: list[str] = field(default_factory=list)  # başka yayına ait görünen dosyalar
     # USB klasöründe oluşturulan alt klasörler: göreli yol → dosyalar
     # (ör. "atiflar/UM20_1" → [atıf yapan yayın PDF'i, endeks belgesi])
@@ -189,6 +193,17 @@ def kalemleri_hazirla(aday, arsiv: KanitArsivi, ayar: PaketAyarlari) -> list[Pak
             for p in kalem.dosyalar:
                 if p == kalem.kayit.tam_metin or p.name == "bildiri_sayfalari.pdf":
                     kalem.ozet_sayfalar[p] = [0]
+                    kalem.ozet_notlari[p] = "yalnızca ilk sayfa"
+        # Bildiri programlarından yalnızca adınızın geçtiği sayfalar
+        if ayar.program_ad_sayfalari and kalem.kayit is not None and kalem.kayit.aves_kod:
+            soyad = (aday.ad_soyad.split() or [""])[-1]
+            for p in kalem.dosyalar:
+                if p.suffix.lower() == ".pdf" and "program" in norm(p.stem) \
+                        and p not in kalem.ozet_sayfalar:
+                    sayfalar, not_ = program_sayfalari(p, soyad, ay.baslik_cikar(kalem.kayit.kunye))
+                    if sayfalar is not None:
+                        kalem.ozet_sayfalar[p] = sayfalar
+                        kalem.ozet_notlari[p] = not_
         # aynı içerik bir kalemde bir kez (ayrı kaydedilmiş sürümler dahil)
         gorulen, tekil = set(), []
         for p in kalem.dosyalar:
@@ -248,6 +263,29 @@ def kalemleri_hazirla(aday, arsiv: KanitArsivi, ayar: PaketAyarlari) -> list[Pak
             k.baslik = "★ BAŞLICA ARAŞTIRMA ESERİ – " + (k.baslik or ad)
             k.klasor_adi += "_BASLICA_ARASTIRMA_ESERI"
     return kalemler
+
+
+def program_sayfalari(pdf: Path, soyad: str, baslik: str) -> tuple[list[int] | None, str]:
+    """Bildiri programında adayın soyadının ya da bildiri başlığının geçtiği sayfalar.
+    (sayfalar, açıklama); bulunamazsa ya da program kısaysa (None, "") – tamamı girer."""
+    import fitz
+    try:
+        d = fitz.open(pdf)
+    except Exception:  # noqa: BLE001
+        return None, ""
+    if d.page_count <= 2:
+        return None, ""
+    s = norm(soyad)
+    b = " ".join(norm(baslik).split()[:6])
+    metinler = [norm(d[i].get_text()) for i in range(d.page_count)]
+    ad_sayfa = [i for i, m in enumerate(metinler) if s and s in m.split()]
+    if ad_sayfa:
+        return ad_sayfa, "yalnızca adınızın geçtiği sayfalar: " + ", ".join(str(i + 1) for i in ad_sayfa)
+    bas_sayfa = [i for i, m in enumerate(metinler) if len(b) > 15 and b in m]
+    if bas_sayfa:
+        return bas_sayfa, ("yalnızca bildiri başlığının geçtiği sayfalar: "
+                           + ", ".join(str(i + 1) for i in bas_sayfa))
+    return [0], "adınız bulunamadı (taranmış olabilir) – yalnızca ilk sayfa"
 
 
 def _goruntu_agirlikli(p: Path, doc) -> bool:
@@ -429,8 +467,7 @@ def birlesik_pdf(kalemler: list[PaketKalemi], aday, sonuc, rapor_pdf: bytes, hed
             mb = p.stat().st_size / 1e6
             if p in k.ozet_sayfalar:
                 gomulecek.append(p)
-                ne = ("yalnızca ilk sayfa" if k.ozet_sayfalar[p] == [0]
-                      else "ilk sayfa ve atıf yapılan sayfalar")
+                ne = k.ozet_notlari.get(p) or "ilk sayfa ve atıf yapılan sayfalar"
                 dosya_satir.append(f"• {p.name}  ({ne}; tamamı USB klasöründe)")
             elif p.suffix.lower() in PDF_GOMULEBILIR | RESIM and mb <= ayar.pdf_dosya_siniri_mb:
                 gomulecek.append(p)

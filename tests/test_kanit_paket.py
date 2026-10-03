@@ -114,6 +114,21 @@ class Paket(unittest.TestCase):
         self.assertNotIn("body", metin)
         self.assertEqual(fitz.open(um01 / "01_tam_metin.pdf").page_count, 5)
 
+    def test_program_ad_sayfalari(self):
+        from test_kanit import pdf_yaz as yaz
+        yaz(self.um01 / "conference program.pdf",
+            ["Program", "Session A: Jones, Smith", "Session B: Ali Yilmaz - Retinal", "Closing"])
+        yaz(self.um02 / "program.pdf", ["Kisa program", "Yilmaz"])          # 2 sayfa: tamamı
+        aday = self._aday()
+        aday.ad_soyad = "Ali Yılmaz"                       # programda "Yilmaz" olarak geçer
+        kalemler = paket.kalemleri_hazirla(aday, self.arsiv, paket.PaketAyarlari())
+        um01 = next(k for k in kalemler if getattr(k.faaliyet, "aves_kod", "") == "UM01")
+        prog = next(p for p in um01.dosyalar if p.name == "conference program.pdf")
+        self.assertEqual(um01.ozet_sayfalar[prog], [2])
+        self.assertIn("adınızın geçtiği sayfalar: 3", um01.ozet_notlari[prog])
+        um02 = next(k for k in kalemler if getattr(k.faaliyet, "aves_kod", "") == "UM02")
+        self.assertNotIn(next(p for p in um02.dosyalar if p.name == "program.pdf"), um02.ozet_sayfalar)
+
     def test_tam_metin_secenegi(self):
         aday = self._aday()
         ps = paket.paket_olustur(aday, t.kriter_kontrol(aday), self.arsiv, self.cikti, rapor_pdf(1),
