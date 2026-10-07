@@ -199,20 +199,123 @@ def kimlik_coz(kimlik: str) -> tuple[str, str, bool]:
     return p[1], p[2] if len(p) > 2 else "bilinmiyor", p[3:4] == ["bolum"]
 
 
+def sayilan(atiflar: list[Atif], belirsiz_kod: str | None = None,
+            haric: tuple[str, ...] = ()) -> list[Atif]:
+    """Puana giren atıflar: öz atıflar, hariç tutulan endeksler (örn. ESCI) ve kodu
+    verilmemiş belirsizler dışarıda."""
+    return [a for a in atiflar if not a.oz_atif and (kod := a.endeks or belirsiz_kod)
+            and kod not in haric]
+
+
+def _pdf_basligi(yol: Path) -> str:
+    """Makale PDF'inin başlığı: ilk sayfadaki en büyük yazı (yoksa PDF meta verisi)."""
+    try:
+        import fitz
+        d = fitz.open(yol)
+        satirlar = []
+        for b in d[0].get_text("dict")["blocks"]:
+            for ln in b.get("lines", []):
+                metin = " ".join(sp["text"] for sp in ln["spans"]).strip()
+                if len(metin) > 3 and ln["spans"]:
+                    satirlar.append((round(max(sp["size"] for sp in ln["spans"]), 1), metin))
+        if satirlar:
+            buyuk = max(b for b, m in satirlar if len(m) > 12) if any(
+                len(m) > 12 for _, m in satirlar) else max(b for b, _ in satirlar)
+            baslik = " ".join(m for b, m in satirlar if b == buyuk)
+            if 15 < len(baslik) < 300:
+                return " ".join(baslik.split())
+        meta = (d.metadata or {}).get("title", "")
+        if 15 < len(meta) < 300 and not meta.lower().endswith((".pdf", ".doc", ".docx")):
+            return meta
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
+_CROSSREF: dict | None = None
+
+
+def _temiz(t: str) -> str:
+    """Crossref metni: HTML kaçışları ve yazı tipinde olmayan tire/boşluk karakterleri."""
+    import html
+    t = html.unescape(html.unescape(t or ""))
+    t = re.sub(r"<[^>]+>", "", t)                      # <i>, <sub> gibi etiketler
+    for a, b in (("‐", "-"), ("‑", "-"), ("‒", "-"), ("–", "–"),
+                 (" ", " "), (" ", " "), (" ", " ")):
+        t = t.replace(a, b)
+    return " ".join(t.split())
+
+
+def _crossref(doi: str, onbellek: Path | None) -> dict:
+    """DOI → {baslik, dergi} (Crossref; sonuçlar önbellek dosyasında saklanır)."""
+    global _CROSSREF
+    import json
+    if _CROSSREF is None:
+        try:
+            _CROSSREF = json.loads(onbellek.read_text(encoding="utf-8")) if onbellek else {}
+        except (OSError, ValueError):
+            _CROSSREF = {}
+    if doi in _CROSSREF:
+        return {k: _temiz(v) for k, v in _CROSSREF[doi].items()}
+    sonuc = {}
+    try:
+        import requests
+        r = requests.get(f"https://api.crossref.org/works/{doi}", timeout=15,
+                         headers={"User-Agent": "tnku-atama (mailto:destek@example.org)"})
+        if r.status_code == 200:
+            m = r.json()["message"]
+            sonuc = {"baslik": _temiz((m.get("title") or [""])[0]),
+                     "dergi": _temiz((m.get("container-title") or [""])[0])}
+    except Exception:  # noqa: BLE001 – internet yoksa boş
+        return {}
+    _CROSSREF[doi] = sonuc
+    if onbellek:
+        try:
+            onbellek.parent.mkdir(parents=True, exist_ok=True)
+            onbellek.write_text(json.dumps(_CROSSREF, ensure_ascii=False, indent=0), encoding="utf-8")
+        except OSError:
+            pass
+    return sonuc
+
+
+def bilgi(a: Atif, onbellek: Path | None = None, internet: bool = True) -> dict:
+    """Atıf yapan yayının listede gösterilecek bilgileri: WoS kaydı varsa oradan; yoksa
+    DOI ile Crossref'ten, o da yoksa PDF'in ilk sayfasındaki başlıktan."""
+    import json
+    v = {}
+    kj = a.yol.parent / "kayit.json"
+    if kj.exists():
+        try:
+            v = json.loads(kj.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            v = {}
+    wos = v.get("kaynak") == "wos"
+    baslik, dergi = (v.get("baslik", ""), v.get("dergi", "")) if wos else ("", "")
+    doi = a.doi or v.get("doi", "")
+    if not baslik and doi and internet:
+        c = _crossref(doi, onbellek)
+        baslik, dergi = c.get("baslik", ""), c.get("dergi", "")
+    if not baslik and a.yol.exists():
+        baslik = _pdf_basligi(a.yol)
+    if not baslik:
+        baslik = a.yol.parent.name if a.yol.parent.name.lower() != "atiflar" else a.yol.stem
+        baslik = re.sub(r"^(Atama|Docentlik|Tesvik)\d{4}_", "", baslik).strip()
+    aylar = "Ocak Şubat Mart Nisan Mayıs Haziran Temmuz Ağustos Eylül Ekim Kasım Aralık".split()
+    tarih = (f"{aylar[a.ay.month - 1]} {a.ay.year}" if a.ay else str(a.yil) if a.yil else "?")
+    return {"baslik": baslik, "dergi": dergi, "tarih": tarih, "doi": doi, "wos": wos}
+
+
 def faaliyetler(atiflar: list[Atif], basvuru_tarihi: date | None, belirsiz_kod: str | None,
-                faaliyet_sinifi) -> list:
+                faaliyet_sinifi, haric: tuple[str, ...] = ()) -> list:
     """Atıfları EK-2 5.x faaliyetlerine dönüştürür (kimlik 'atif:<kod>:<zaman>[:bolum]').
 
     Zaman ayrımı `zaman()` ile yapılır. Kitap bölümlerindeki atıflar (5.7) ayrı satır olur
     ve ÜAK'ta 5b kalemine eşlenir. belirsiz_kod: endeksi belirlenemeyenlerin kodu
     (None → eklenmez)."""
     toplam = Counter()
-    for a in atiflar:
-        if a.oz_atif:
-            continue
+    for a in sayilan(atiflar, belirsiz_kod, haric):
         kod = a.endeks or belirsiz_kod
-        if kod:
-            toplam[(kod, zaman(a, basvuru_tarihi), a.kitap_bolumu and kod == "5.7")] += 1
+        toplam[(kod, zaman(a, basvuru_tarihi), a.kitap_bolumu and kod == "5.7")] += 1
     sonuc = []
     for (kod, z, bolum), adet in sorted(toplam.items()):
         f = faaliyet_sinifi(kod, adet=adet, docent_sonrasi=(z == "sonrası"),
