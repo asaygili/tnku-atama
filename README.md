@@ -87,7 +87,13 @@ Sayı, AVES'teki sıradır (UM01 = AVES'teki ilk uluslararası makale). AVES'te 
 Profesörlük başvurusunda, doçentlik başvuru dönemindeki ÜAK kriterlerinin doçentlik başvurusu sonrası çalışmalarla yeniden sağlanması gerekir. **Aday Bilgileri → Doçentlik başvurusundaki ÜAK kriteri** alanından dönem seçildiğinde, doçentlik başvurusu sonrası faaliyetler ÜAK tablosuna göre otomatik puanlanır. Lisansüstü tezlerden üretilmiş yayın şartı profesörlükte aranmaz. Sonuç ekranda ve PDF'te bölüm bölüm gösterilir.
 
 Tanımlı kriter setleri:
-* ÜAK Mart 2022 – Mühendislik (Tablo 9, koşul 91)
+* ÜAK Mühendislik (Tablo 9, koşul 91), 2016–2026 bütün dönemler:
+  * Nisan 2016 (koşul sistemi)
+  * Aralık 2016 – Aralık 2017
+  * Nisan 2018 – Ekim 2023 (Mart 2022 dahil)
+  * Mart 2024 – Ekim 2026 (Q'ya göre puanlama)
+
+Dr. Öğr. Üyesi kadrosunda aynı listeden bir dönem seçilirse, ÜAK'a doçentlik başvurusu için ön kontrol yapılır (atama koşullarını etkilemez).
 
 **Yeni dönem / temel alan eklemek:** `uak_kriterleri/mart_2022.py` örnek alınarak `uak_kriterleri/` klasöründe bir `KriterSeti` tanımlanır ve `kaydet()` ile kaydedilir. Yeni dosya ise `uak_kriterleri/__init__.py` dosyasının en altındaki içe aktarma listesine eklenir. Her kalemde puan, eşlenen EK-2 kodları, tezden üretilmiş olma koşulu ve yazar paylaşım kuralı; her bölümde asgari/azami puan ve özel koşullar veri olarak yazılır, hesaplama koduna dokunulmaz.
 

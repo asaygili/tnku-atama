@@ -22,7 +22,7 @@ MAKALE_ULUSLARARASI = ("1.4", "1.5", "1.7")
 
 MUHENDISLIK = kaydet(KriterSeti(
     kimlik="2022-mart/muhendislik",
-    donem="Mart 2022",
+    donem="Nisan 2018 – Ekim 2023",     # Mart 2022 dahil; bu dönemlerde Tablo 9 içeriği aynı
     temel_alan="Mühendislik",
     tablo="Tablo 9",
     kosul_no="91",
