@@ -75,7 +75,8 @@ def doldur(faaliyetler: list, arsiv: KanitArsivi, soyad: str, basvuru: date | No
 
     atiflar = atif.atiflari_topla(arsiv, soyad)
     if atiflar:
-        yeni_atif = atif.faaliyetler(atiflar, basvuru, None, faaliyet_sinifi)
+        from .ayar import atif_haric
+        yeni_atif = atif.faaliyetler(atiflar, basvuru, None, faaliyet_sinifi, haric=atif_haric())
         faaliyetler = [f for f in faaliyetler if not (f.kimlik or "").startswith("atif:")
                        and not (f.kod in ("5.1", "5.9") and not f.kimlik and not f.aves_kod)]
         faaliyetler += yeni_atif

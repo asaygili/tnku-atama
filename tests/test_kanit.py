@@ -215,3 +215,29 @@ class BildiriSayfalari(GeciciArsiv):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EskiListeyleYenidenAdlandirma(unittest.TestCase):
+    """Eski bir AVES listesi (yeni yayınları içermeyen önbellek) klasörleri kaydırmamalı."""
+
+    def test_cakisan_plan_uygulanmaz(self):
+        import tempfile, shutil
+        from kanit import klasor as kk
+        from kanit.kayit import kayit_yaz
+        kok = Path(tempfile.mkdtemp(prefix="kanit_cakisma_"))
+        try:
+            for kod, kunye, kimlik in (("UM01", KUNYE_A, "doi:10.1/yeni"),
+                                       ("UM02", KUNYE_B, "doi:10.1/eski")):
+                d = kok / kk.klasor_adi(kod, kunye)
+                d.mkdir()
+                kayit_yaz(d, kod, kunye, kimlik[4:])
+            a = KanitArsivi(kok)
+            # Eski listede yeni yayın (UM01) yok; eski yayın UM01 sanılıyor
+            plan = kk.numara_plani(a, [t.Faaliyet("1.1", aves_kod="UM01", kimlik="doi:10.1/eski")])
+            self.assertEqual(len(plan), 1)
+            self.assertTrue(kk.plan_cakismalari(a, plan))
+            with self.assertRaises(ValueError):
+                kk.numara_uygula(a, plan)
+            self.assertEqual(sorted(p.name[:4] for p in kok.iterdir()), ["UM01", "UM02"])
+        finally:
+            shutil.rmtree(kok, ignore_errors=True)

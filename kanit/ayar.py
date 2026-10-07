@@ -25,6 +25,20 @@ def kanit_koku() -> str:
     return kok
 
 
+def atif_haric() -> tuple[str, ...]:
+    """Atıf sayımında hariç tutulan EK-2 kodları (örn. ("5.2",): ESCI atıfları sayılmaz)."""
+    return tuple(oku().get("atif_haric_endeksler", ()))
+
+
+def atif_haric_kaydet(kodlar) -> None:
+    ayar = oku()
+    ayar["atif_haric_endeksler"] = sorted(set(kodlar))
+    try:
+        AYAR_DOSYASI.write_text(json.dumps(ayar, ensure_ascii=False, indent=1), encoding="utf-8")
+    except OSError:
+        pass
+
+
 def kanit_koku_kaydet(kok: str) -> None:
     ayar = oku()
     ayar["kanit_koku"] = kok
