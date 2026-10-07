@@ -1181,6 +1181,7 @@ def kriter_kontrol(aday: AdayBilgi) -> dict:
                 kset,
                 [f for f in aday.faaliyetler if docent_basvuru_sonrasi_mi(f, aday)],
                 egitim_yari_yil=aday.doktora_sonrasi_ders_yari_yil,
+                egitim_yil=aday.ders_yillik_program_yil,
                 profesorluk=True,
             )
             for k in uak_sonuc["kontroller"]:
@@ -1246,11 +1247,21 @@ def kriter_kontrol(aday: AdayBilgi) -> dict:
     genel_basari = all(
         "✓" in s["durum"] for s in sonuclar
     )
+    # Dr. Öğr. Üyesi: ÜAK'a doçentlik başvurusu ön kontrolü (bilgi amaçlı; atama
+    # koşullarına ve genel sonuca girmez)
+    uak_on_kontrol = None
+    if aday.kadro_turu in ("dr_ilk", "dr_yeniden") and aday.uak_kriter_seti:
+        uak_on_kontrol = uak.degerlendir(
+            uak.getir(aday.uak_kriter_seti), list(aday.faaliyetler),
+            egitim_yari_yil=aday.doktora_sonrasi_ders_yari_yil,
+            egitim_yil=aday.ders_yillik_program_yil,
+            profesorluk=False, doktora_tarihi=aday.doktora_tarihi)
     return {
         "puanlar": puanlar,
         "kriterler": sonuclar,
         "genel_sonuc": genel_basari,
         "uak": uak_sonuc,
+        "uak_on_kontrol": uak_on_kontrol,
     }
 
 

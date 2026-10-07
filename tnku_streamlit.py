@@ -1031,7 +1031,8 @@ def _aday_olustur() -> t.AdayBilgi:
         sifahi_sinav_basarili=bool(st.session_state.get("v_sifahi", False)),
         doktora_sonrasi_ders_yari_yil=int(st.session_state.get("v_ders", 0)),
         ders_yillik_program_yil=int(st.session_state.get("v_ders_yil", 0)),
-        doktora_tarihi=st.session_state.get("v_doktora_t") if kadro == "docent" else None,
+        doktora_tarihi=(st.session_state.get("v_doktora_t")
+                        if kadro in ("docent", "dr_ilk", "dr_yeniden") else None),
         yeniden_puan_muafiyeti=(st.session_state.get("v_muafiyet", "") or "")
         if kadro == "dr_yeniden" else "",
         bir_yil_atama_sayisi=int(st.session_state.get("v_bir_yil", 1)),
@@ -1056,7 +1057,7 @@ UAK_BASLICA_YARDIM = ("ÜAK tanımı: tek yazarlı makale ya da adayın danışm
 
 def _uak_seti():
     kimlik = st.session_state.get("v_uak_set", "")
-    if st.session_state.get("v_kadro") == "profesor" and kimlik:
+    if st.session_state.get("v_kadro") in ("profesor", "dr_ilk", "dr_yeniden") and kimlik:
         return uak.getir(kimlik)
     return None
 
@@ -1325,13 +1326,25 @@ def _pdf_bytes(aday: t.AdayBilgi, sonuc: dict) -> bytes:
     elems.append(kt)
     elems.append(Spacer(1, 10))
 
-    uak_s = sonuc.get("uak")
+    uak_s = sonuc.get("uak") or sonuc.get("uak_on_kontrol")
     if uak_s:
-        elems.append(Paragraph("UAK DOCENTLIK KRITERLERI - MD. 11(2)", s_sec))
-        elems.append(Paragraph(
-            _xml_escape(f"{uak_s['set'].ad}. Yalnızca doçentlik başvurusu sonrası "
-                        f"faaliyetler değerlendirilmiştir. Toplam: "
-                        f"{uak_s['toplam']:g} puan."), s_xs))
+        if sonuc.get("uak"):
+            elems.append(Paragraph("UAK DOCENTLIK KRITERLERI - MD. 11(2)", s_sec))
+            elems.append(Paragraph(
+                _xml_escape(f"{uak_s['set'].ad}. Yalnızca doçentlik başvurusu sonrası "
+                            f"faaliyetler değerlendirilmiştir. Toplam: "
+                            f"{uak_s['toplam']:g} puan."), s_xs))
+        else:
+            elems.append(Paragraph("UAK DOCENTLIK BASVURUSU ON KONTROLU", s_sec))
+            elems.append(Paragraph(
+                _xml_escape(f"{uak_s['set'].ad}. Bilgi amaçlıdır; atama sonucunu etkilemez. "
+                            f"Toplam: {uak_s['toplam']:g} puan – "
+                            + ("şartlar sağlanıyor." if uak_s["saglandi"]
+                               else "şartlar henüz sağlanmıyor.")), s_xs))
+            for k in uak_s["kontroller"]:
+                elems.append(Paragraph(_xml_escape(
+                    f"[{'SAĞLANIYOR' if k['saglandi'] else 'SAĞLANMIYOR'}] {k['kriter']}"
+                    + (f" – {k['notlar']}" if k["notlar"] else "")), s_xs))
         elems.append(Spacer(1, 4))
         udata = [["Bölüm", "Faaliyet", "Ham Puan", "Puan", "Asgari", "Azami"]]
         for b in uak_s["bolumler"]:
@@ -1670,6 +1683,25 @@ with tab1:
                                 min_value=1, max_value=10, value=1, step=1,
                                 help="EK-1 (d): %25 kitap sınırı 1 yıllık yeniden atamada en "
                                      "fazla iki kez uygulanmaz.")
+        if st.session_state.get("v_kadro") in ("dr_ilk", "dr_yeniden"):
+            st.markdown("**ÜAK doçentlik başvurusu ön kontrolü** (isteğe bağlı)")
+            st.selectbox(
+                "Doçentliğe başvuracağınız dönemin ÜAK kriteri",
+                options=[""] + [s.kimlik for s in uak.setler()], key="v_uak_set",
+                format_func=lambda k: uak.getir(k).ad if k else "Ön kontrol yapma",
+                help="Seçerseniz faaliyetleriniz bu dönemin ÜAK doçentlik başvuru şartlarına göre "
+                     "puanlanır ve eksikler gösterilir. Yalnızca bilgi amaçlıdır; Dr. Öğr. Üyesi "
+                     "atama sonucunu etkilemez. Güncel dönem için 'Mart 2024 – Ekim 2026'yı seçin.")
+            if st.session_state.get("v_uak_set"):
+                st.date_input(
+                    "Doktora tarihi", value=None, key="v_doktora_t",
+                    min_value=datetime.date(1970, 1, 1),
+                    max_value=datetime.date.today(), format="DD.MM.YYYY",
+                    help="ÜAK: puanın en az 90'ı doktora sonrası çalışmalardan olmalı; bazı "
+                         "bölümlerde doktora sonrası asgari puan aranır. Girilmezse tüm "
+                         "faaliyetler doktora sonrası sayılır.")
+                st.markdown("[🔗 ÜAK Doçentlik Başvuru Şartları]"
+                            "(https://www.uak.gov.tr/page/docentlik-basvuru-sartlari-kLPHX)")
         if st.session_state.get("v_kadro") == "docent":
             st.date_input(
                 "Doktora / uzmanlık / sanatta yeterlilik tarihi",
@@ -2527,13 +2559,29 @@ if sonuc is not None and son_aday is not None:
         st.divider()
 
     # ── ÜAK doçentlik kriterleri (Md. 11(2)) ────────────────────────────────
-    uak_s = sonuc.get("uak")
+    uak_s = sonuc.get("uak") or sonuc.get("uak_on_kontrol")
     if uak_s:
-        ui.kart_basligi("ÜAK doçentlik kriterleri – Md. 11(2)",
-                        "Doçentlik başvuru dönemindeki ÜAK kriterlerinin, doçentlik başvurusu "
-                        "sonrası çalışmalarla yeniden sağlanıp sağlanmadığı.", "🎯")
-        st.caption(f"{uak_s['set'].ad} · yalnızca doçentlik başvurusu sonrası "
-                   f"faaliyetler · toplam {uak_s['toplam']:g} puan")
+        if sonuc.get("uak"):
+            ui.kart_basligi("ÜAK doçentlik kriterleri – Md. 11(2)",
+                            "Doçentlik başvuru dönemindeki ÜAK kriterlerinin, doçentlik başvurusu "
+                            "sonrası çalışmalarla yeniden sağlanıp sağlanmadığı.", "🎯")
+            st.caption(f"{uak_s['set'].ad} · yalnızca doçentlik başvurusu sonrası "
+                       f"faaliyetler · toplam {uak_s['toplam']:g} puan")
+        else:
+            ui.kart_basligi("ÜAK doçentlik başvurusu ön kontrolü",
+                            "Faaliyetlerinizin seçtiğiniz dönemin ÜAK doçentlik başvuru şartlarını "
+                            "karşılayıp karşılamadığı (bilgi amaçlı; atama sonucunu etkilemez).",
+                            "🎯")
+            st.markdown(
+                f'<div class="{"sonuc-ok" if uak_s["saglandi"] else "sonuc-fail"}">'
+                f'{"✅ ÜAK doçentlik başvuru şartları sağlanıyor" if uak_s["saglandi"] else "❌ ÜAK doçentlik başvuru şartları henüz sağlanmıyor"}'
+                f' – {uak_s["toplam"]:g} puan</div>', unsafe_allow_html=True)
+            st.caption(f"{uak_s['set'].ad} · tüm faaliyetler")
+            for k in uak_s["kontroller"]:
+                st.markdown(f'<div class="{"kriter-ok" if k["saglandi"] else "kriter-fail"}">'
+                            f'{"✓" if k["saglandi"] else "✗"} {k["kriter"]}'
+                            + (f' <small>— {k["notlar"]}</small>' if k["notlar"] else "")
+                            + "</div>", unsafe_allow_html=True)
         st.dataframe(pd.DataFrame([{
             "Bölüm":    f"{b['no']}. {b['ad']}",
             "Faaliyet": b["adet"],

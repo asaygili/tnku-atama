@@ -47,6 +47,14 @@ class Kalem:
     patent_raporlu: bool = False
     # İkinci / eş danışman yarı puan alır
     ikinci_danisman_yarim: bool = False
+    # Dergi kuartiline göre puan, örn. (("Q1", 30), ("Q2", 20), …); Q girilmemişse en düşük
+    q_puanlari: tuple[tuple[str, float], ...] = ()
+    # Eşik kalemi: faaliyet adedi bu eşiğe ulaşırsa bir kez `puan` (örn. h-indeks ≥ 5)
+    esik_adet: int = 0
+    # Yalnızca bu patent durumları ("tescilli", "arastirma_raporu", "basvuru")
+    patent_durumlari: tuple[str, ...] = ()
+    # Yalnızca başarıyla tamamlanmış projeler (Faaliyet.devam_ediyor değilse)
+    tamamlanmis: bool = False
 
 
 @dataclass(frozen=True)
@@ -56,6 +64,8 @@ class AltKosul:
     kalemler: tuple[str, ...]
     min_puan: float
     baslica_yazar_gerekli: bool = False  # en az bir eserde başlıca yazar
+    baslica_q: tuple[str, ...] = ()      # başlıca yazarlık bu kuartillerde aranır (örn. Q1–Q3)
+    doktora_sonrasi: bool = False        # yalnızca doktora sonrası çalışmalardan
 
 
 @dataclass(frozen=True)
@@ -73,6 +83,12 @@ class Bolum:
     iki_yil_egitim_puani: float = 0
     # Programın denetleyemediği, elle kontrol edilmesi gereken kurallar
     elle_kontrol: tuple[str, ...] = ()
+    # Bölümdeki belirli kalemlerin toplam üst sınırı: ((("4c", "4d"), 5), …)
+    alt_sinirlar: tuple[tuple[tuple[str, ...], float], ...] = ()
+    # min_yayin yalnızca bu kalemlerden sayılır (boşsa tüm kalemler)
+    min_yayin_kalemleri: tuple[str, ...] = ()
+    # Eğitim puanı ders sayısından: dönemlik ≥4 farklı yarıyıl → 2, yıllık ≥2 yıl → 2
+    egitim_sayimi: bool = False
 
 
 @dataclass(frozen=True)
@@ -86,6 +102,12 @@ class KriterSeti:
     doktora_sonrasi_min: float
     bolumler: tuple[Bolum, ...]
     kaynak: str = ""
+    # Başlıca yazar tanımı makalenin ilk yazarını da kapsar (2018 öncesi dönemler)
+    ilk_yazar_baslica: bool = False
+    # "Doktora sonrası ≥ X puan" hesabına girmeyen bölümler (örn. tezden üretilmiş yayınlar)
+    doktora_sonrasi_haric: tuple[int, ...] = ()
+    # Puan yerine koşul aranan eski dönemler: toplam_min yayın adedidir
+    kosul_sistemi: bool = False
 
     @property
     def ad(self) -> str:
@@ -142,8 +164,10 @@ def makale_yazar_payi(toplam_yazar: int, baslica: Optional[bool]) -> float:
     return 0.5 if baslica else 0.5 / (n - 1)
 
 
-def _baslica_mi(f) -> Optional[bool]:
+def _baslica_mi(f, kset: Optional["KriterSeti"] = None) -> Optional[bool]:
     if f.toplam_yazar <= 1:
+        return True
+    if kset is not None and kset.ilk_yazar_baslica and getattr(f, "yazar_sirasi", 0) == 1:
         return True
     return getattr(f, "uak_baslica_yazar", None)
 
@@ -165,29 +189,50 @@ def kalem_bul(kset: KriterSeti, f) -> Optional[tuple[Bolum, Kalem]]:
             if k.patent_raporlu and f.patent_durum not in (None, "tescilli",
                                                           "arastirma_raporu"):
                 continue
+            if k.patent_durumlari and (f.patent_durum or "tescilli") not in k.patent_durumlari:
+                continue
+            if k.tamamlanmis and getattr(f, "devam_ediyor", False):
+                continue
             return b, k
     return None
 
 
-def _pay(k: Kalem, f) -> float:
+def _pay(k: Kalem, f, kset: Optional["KriterSeti"] = None) -> float:
     if k.yazar_dagilimi == "makale":
-        return makale_yazar_payi(f.toplam_yazar, _baslica_mi(f))
+        return makale_yazar_payi(f.toplam_yazar, _baslica_mi(f, kset))
     if k.yazar_dagilimi == "esit":
         return 1.0 / max(1, f.toplam_yazar)
     return 1.0
 
 
+def _kalem_puani(k: Kalem, f) -> float:
+    """Kalemin bir faaliyet için birim puanı (Q'ya göre ya da sabit)."""
+    if k.q_puanlari:
+        tablo = dict(k.q_puanlari)
+        return tablo.get(getattr(f, "q_degeri", None) or "", min(tablo.values()))
+    return k.puan
+
+
+def _doktora_sonrasi_mi(f, doktora_tarihi) -> bool:
+    """Doktora tarihi bilinmiyorsa ya da faaliyet tarihsizse (örn. atıf satırları) sayılır."""
+    t = getattr(f, "yayin_tarihi", None)
+    return doktora_tarihi is None or t is None or t > doktora_tarihi
+
+
 def degerlendir(kset: KriterSeti, faaliyetler: list, *,
-                egitim_yari_yil: int = 0, profesorluk: bool = True) -> dict:
+                egitim_yari_yil: int = 0, egitim_yil: int = 0,
+                profesorluk: bool = True, doktora_tarihi=None) -> dict:
     """
     Faaliyetleri kriter setine göre puanlar ve koşulları denetler.
 
     faaliyetler      Değerlendirmeye girecek faaliyetler (profesörlükte:
                      doçentlik başvurusu sonrası olanlar).
     egitim_yari_yil  Farklı yarıyıl ders sayısı (≥4 → "2 yıl eğitim" kuralı).
+    egitim_yil       Yıllık programlarda ders verilen farklı yıl sayısı.
     profesorluk      True → Md. 11(2) istisnası uygulanır ve tüm faaliyetler
                      doçentlik başvurusu sonrası (dolayısıyla doktora sonrası)
-                     kabul edilir.
+                     kabul edilir. False → doçentliğe başvuru ön kontrolü:
+                     doktora sonrası şartları `doktora_tarihi`ne göre denetlenir.
     """
     satirlar, eslesmeyen = [], []
     for f in faaliyetler:
@@ -196,14 +241,19 @@ def degerlendir(kset: KriterSeti, faaliyetler: list, *,
             eslesmeyen.append(f)
             continue
         b, k = bk
-        pay = _pay(k, f)
+        pay = _pay(k, f, kset)
         danisman = 0.5 if (k.ikinci_danisman_yarim
                            and getattr(f, "ikinci_danisман", False)) else 1.0
+        birim = _kalem_puani(k, f)
+        if k.esik_adet:
+            puan = birim if f.adet >= k.esik_adet else 0.0
+        else:
+            puan = birim * pay * danisman * f.adet
         satirlar.append({
             "faaliyet": f, "bolum": b.no, "kalem": k.kod, "kalem_ad": k.ad,
-            "kalem_puan": k.puan, "adet": f.adet, "pay": pay,
-            "danisman_carpani": danisman,
-            "puan": round(k.puan * pay * danisman * f.adet, 2),
+            "kalem_puan": birim, "adet": f.adet, "pay": pay,
+            "danisman_carpani": danisman, "puan": round(puan, 2),
+            "doktora_sonrasi": profesorluk or _doktora_sonrasi_mi(f, doktora_tarihi),
         })
 
     bolum_sonuclari, kontroller = [], []
@@ -212,19 +262,30 @@ def degerlendir(kset: KriterSeti, faaliyetler: list, *,
         kontroller.append({"kriter": kriter, "saglandi": saglandi,
                            "notlar": notlar})
 
-    toplam = 0.0
-    for b in kset.bolumler:
-        bs = [s for s in satirlar if s["bolum"] == b.no]
+    def bolum_puani(b: Bolum, bs: list) -> tuple[float, float]:
         ham = sum(s["puan"] for s in bs)
         puan = ham
-        if b.iki_yil_egitim_puani and egitim_yari_yil >= 4:
+        for kalemler, ust in b.alt_sinirlar:
+            alt = sum(s["puan"] for s in bs if s["kalem"] in kalemler)
+            puan -= max(0.0, alt - ust)
+        if b.egitim_sayimi:
+            puan += (2 if egitim_yari_yil >= 4 else 0) + (2 if egitim_yil >= 2 else 0)
+        if b.iki_yil_egitim_puani and (egitim_yari_yil >= 4 or egitim_yil >= 2):
             puan = max(puan, b.iki_yil_egitim_puani)
         if b.max_puan is not None:
             puan = min(puan, b.max_puan)
-        puan = round(puan, 2)
+        return round(ham, 2), round(puan, 2)
+
+    toplam = 0.0
+    doktora_sonrasi_toplam = 0.0
+    for b in kset.bolumler:
+        bs = [s for s in satirlar if s["bolum"] == b.no]
+        ham, puan = bolum_puani(b, bs)
         toplam += puan
+        if b.no not in kset.doktora_sonrasi_haric:
+            doktora_sonrasi_toplam += bolum_puani(b, [s for s in bs if s["doktora_sonrasi"]])[1]
         bolum_sonuclari.append({
-            "no": b.no, "ad": b.ad, "ham": round(ham, 2), "puan": puan,
+            "no": b.no, "ad": b.ad, "ham": ham, "puan": puan,
             "min": b.min_puan, "max": b.max_puan, "adet": len(bs),
             "elle_kontrol": b.elle_kontrol,
         })
@@ -233,7 +294,8 @@ def degerlendir(kset: KriterSeti, faaliyetler: list, *,
             kontrol(f"{b.no}. {b.ad} ≥{b.min_puan:g} puan",
                     puan >= b.min_puan, f"Puan: {puan:g}")
         if b.min_yayin:
-            yayin = sum(s["adet"] for s in bs)
+            yayin = sum(s["adet"] for s in bs
+                        if not b.min_yayin_kalemleri or s["kalem"] in b.min_yayin_kalemleri)
             if profesorluk and b.profesorlukte_aranmaz:
                 kontrol(f"{b.no}. {b.ad} en az {b.min_yayin} yayın", True,
                         "Md. 11(2) gereği profesörlükte aranmaz")
@@ -241,24 +303,38 @@ def degerlendir(kset: KriterSeti, faaliyetler: list, *,
                 kontrol(f"{b.no}. {b.ad} en az {b.min_yayin} yayın",
                         yayin >= b.min_yayin, f"Yayın: {yayin}")
         for ak in b.alt_kosullar:
-            aks = [s for s in bs if s["kalem"] in ak.kalemler]
+            aks = [s for s in bs if s["kalem"] in ak.kalemler
+                   and (not ak.doktora_sonrasi or s["doktora_sonrasi"])]
             ak_puan = round(sum(s["puan"] for s in aks), 2)
             notlar = f"Puan: {ak_puan:g}"
             ok = ak_puan >= ak.min_puan
             if ak.baslica_yazar_gerekli:
-                baslica = any(_baslica_mi(s["faaliyet"]) for s in aks)
+                baslica = any(_baslica_mi(s["faaliyet"], kset) and (
+                    not ak.baslica_q or getattr(s["faaliyet"], "q_degeri", None) in ak.baslica_q)
+                    for s in aks)
                 ok = ok and baslica
                 notlar += ("; başlıca yazar olunan makale var" if baslica
-                           else "; başlıca yazar olunan makale yok")
+                           else "; başlıca yazar olunan makale yok"
+                           + (f" ({'/'.join(ak.baslica_q)})" if ak.baslica_q else ""))
             kontrol(ak.aciklama, ok, notlar)
 
     toplam = round(toplam, 2)
-    kontrol(f"Toplam ≥{kset.toplam_min:g} puan", toplam >= kset.toplam_min,
-            f"Toplam: {toplam:g}")
-    if profesorluk:
-        kontrol(f"Doktora sonrası çalışmalardan ≥{kset.doktora_sonrasi_min:g} puan",
-                toplam >= kset.doktora_sonrasi_min,
-                "Doçentlik başvurusu sonrası çalışmaların tamamı doktora sonrasıdır")
+    if kset.kosul_sistemi:
+        kontrol(f"En az {kset.toplam_min:g} makale", toplam >= kset.toplam_min,
+                f"Makale: {toplam:g}")
+    else:
+        kontrol(f"Toplam ≥{kset.toplam_min:g} puan", toplam >= kset.toplam_min,
+                f"Toplam: {toplam:g}")
+    if kset.doktora_sonrasi_min and not kset.kosul_sistemi:
+        if profesorluk:
+            kontrol(f"Doktora sonrası çalışmalardan ≥{kset.doktora_sonrasi_min:g} puan",
+                    doktora_sonrasi_toplam >= kset.doktora_sonrasi_min,
+                    "Doçentlik başvurusu sonrası çalışmaların tamamı doktora sonrasıdır")
+        else:
+            kontrol(f"Doktora sonrası çalışmalardan ≥{kset.doktora_sonrasi_min:g} puan",
+                    doktora_sonrasi_toplam >= kset.doktora_sonrasi_min,
+                    f"Doktora sonrası: {round(doktora_sonrasi_toplam, 2):g}"
+                    + ("" if doktora_tarihi else " (doktora tarihi girilmedi: tümü sayıldı)"))
 
     return {
         "set": kset,
@@ -274,4 +350,4 @@ def degerlendir(kset: KriterSeti, faaliyetler: list, *,
 # ─────────────────────────────────────────────────────────────────────────────
 # Dönem tanımları (yeni dönem dosyalarını buraya ekleyin)
 # ─────────────────────────────────────────────────────────────────────────────
-from . import mart_2022  # noqa: E402,F401
+from . import mart_2022, muhendislik_donemleri  # noqa: E402,F401
